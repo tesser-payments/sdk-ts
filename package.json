@@ -1,0 +1,46 @@
+{
+  "name": "@tesser-payments/sdk",
+  "version": "0.0.0",
+  "description": "Barebones TypeScript SDK for Tesser API signing operations.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=18",
+    "bun": ">=1.1"
+  },
+  "scripts": {
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build ./src/index.ts --target=node --format=esm --outdir=./dist --external @turnkey/api-key-stamper --external viem --external p-retry --external @tesser-payments/types",
+    "build:types": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "typecheck": "tsc --noEmit",
+    "release": "changeset publish"
+  },
+  "peerDependencies": {
+    "@tesser-payments/types": "*",
+    "@turnkey/api-key-stamper": "*",
+    "viem": "^2"
+  },
+  "dependencies": {
+    "p-retry": "^6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9",
+    "@changesets/cli": "^2.27",
+    "@tesser-payments/types": "*",
+    "@turnkey/api-key-stamper": "*",
+    "@types/node": "^20",
+    "typescript": "^5.4",
+    "viem": "^2",
+    "vitest": "^2"
+  }
+}
