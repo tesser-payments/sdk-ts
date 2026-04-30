@@ -42,6 +42,23 @@ export interface FetchWithRetryOptions {
 const RETRYABLE_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
 
 /**
+ * RFC 7231 §7.1.3: Retry-After can be either an integer (seconds to wait)
+ * or an HTTP-date (absolute time at which to retry). Returns milliseconds
+ * to wait, or 0 for missing/invalid headers.
+ */
+function parseRetryAfter(headerValue: string | null): number {
+  if (!headerValue) return 0;
+  const trimmed = headerValue.trim();
+  const numericSeconds = Number(trimmed);
+  if (Number.isFinite(numericSeconds) && numericSeconds >= 0) {
+    return numericSeconds * 1_000;
+  }
+  const dateMs = Date.parse(trimmed);
+  if (Number.isNaN(dateMs)) return 0;
+  return Math.max(0, dateMs - Date.now());
+}
+
+/**
  * Parses Tesser's `{ "errors": [{ error_code, error_message, ui_message? }] }`
  * envelope from a response body. Returns an empty array for non-JSON, non-
  * Tesser-shaped, or unparseable bodies.
@@ -137,8 +154,10 @@ export async function fetchWithRetry<T>(
   const timeout = options.timeout ?? ctx.timeout;
   const maxRetries = options.maxRetries ?? ctx.maxRetries;
 
+  // Preserve a caller-supplied "Bearer " prefix so we don't double-prefix.
+  const authValue = /^Bearer\s/i.test(ctx.bearer) ? ctx.bearer : `Bearer ${ctx.bearer}`;
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${ctx.bearer}`,
+    Authorization: authValue,
     Accept: 'application/json',
     ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     ...options.headers,
@@ -182,8 +201,8 @@ export async function fetchWithRetry<T>(
 
         if (RETRYABLE_STATUSES.has(res.status)) {
           if (res.status === 429) {
-            const retryAfter = Number(res.headers.get('retry-after') ?? '0');
-            if (retryAfter > 0) await sleep(retryAfter * 1_000, options.signal);
+            const retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
+            if (retryAfterMs > 0) await sleep(retryAfterMs, combined.signal);
           }
           throw err;
         }

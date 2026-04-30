@@ -29,6 +29,16 @@ function normalizeNetworkKey(key: string): string {
   return key.trim().toLowerCase().replace(/-/g, '_');
 }
 
+/**
+ * Trims surrounding whitespace from a bearer token. Tokens read from env vars
+ * (e.g. `$(cat token.txt)`) often carry a trailing `\n`, which would corrupt
+ * the Authorization header. Any leading "Bearer " prefix is preserved — the
+ * HTTP layer detects and avoids double-prefixing.
+ */
+function normalizeToken(token: string): string {
+  return token.trim();
+}
+
 export class TesserClient {
   #token: string;
   readonly baseUrl: string;
@@ -41,7 +51,8 @@ export class TesserClient {
   readonly logLevel: LogLevel;
 
   constructor(config: TesserClientConfig) {
-    if (!config.token) throw new TesserConfigError('TesserClient: token is required');
+    const token = config.token ? normalizeToken(config.token) : '';
+    if (!token) throw new TesserConfigError('TesserClient: token is required');
     const s = config.signing;
     if (!s || !s.publicKey || !s.privateKey || !s.enclaveId) {
       throw new TesserConfigError(
@@ -49,7 +60,7 @@ export class TesserClient {
       );
     }
 
-    this.#token = config.token;
+    this.#token = token;
     this.baseUrl = (config.baseUrl ?? 'https://api.tesser.xyz').trim().replace(/\/+$/, '');
     this.signing = Object.freeze({ ...s });
     this.timeout = config.timeout ?? 30_000;
@@ -66,8 +77,9 @@ export class TesserClient {
   }
 
   setToken(token: string): void {
-    if (!token) throw new TesserConfigError('TesserClient.setToken: token is required');
-    this.#token = token;
+    const normalized = token ? normalizeToken(token) : '';
+    if (!normalized) throw new TesserConfigError('TesserClient.setToken: token is required');
+    this.#token = normalized;
   }
 
   /**

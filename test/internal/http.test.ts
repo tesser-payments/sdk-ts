@@ -181,4 +181,30 @@ describe('fetchWithRetry', () => {
     expect(headers.get('authorization')).toBe('Bearer test-token');
     expect(headers.get('accept')).toBe('application/json');
   });
+
+  it('preserves a caller-supplied "Bearer " prefix without double-prefixing', async () => {
+    const ctx = { ...baseCtx(), bearer: 'Bearer pre-prefixed-token' };
+    const fetchMock = ctx.fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    await fetchWithRetry(ctx, 'https://api/foo');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer pre-prefixed-token');
+  });
+
+  it('honors an HTTP-date Retry-After (in addition to numeric seconds)', async () => {
+    const ctx = { ...baseCtx(), maxRetries: 1 };
+    const fetchMock = ctx.fetch as unknown as ReturnType<typeof vi.fn>;
+    // ~50ms in the future — fast enough to keep the test snappy.
+    const future = new Date(Date.now() + 50).toUTCString();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(429, { errors: [] }, { 'retry-after': future }))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    const start = Date.now();
+    const res = await fetchWithRetry<{ ok: boolean }>(ctx, 'https://api/foo');
+    const elapsed = Date.now() - start;
+    expect(res.data.ok).toBe(true);
+    // We waited at least until the HTTP-date target. Allow generous slack
+    // for p-retry's own backoff layered on top.
+    expect(elapsed).toBeGreaterThanOrEqual(40);
+  });
 });

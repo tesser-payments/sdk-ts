@@ -50,15 +50,63 @@ describe('TesserClient', () => {
     }).toThrow();
   });
 
-  it('setToken updates the bearer without affecting other fields', () => {
-    const c = new TesserClient(baseConfig);
-    expect(() => c.setToken('new-tok')).not.toThrow();
+  it('setToken updates the bearer used for outgoing requests', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ address: '0xab' }), { status: 200 }));
+    const c = new TesserClient({
+      ...baseConfig,
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    c.setToken('new-tok');
+    // Other state untouched.
     expect(c.baseUrl).toBe('https://api.tesser.xyz');
+
+    // Verify the new bearer reaches the wire.
+    await c.getAccountAddress('acc_1');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const headers = new Headers(init?.headers);
+    expect(headers.get('authorization')).toBe('Bearer new-tok');
   });
 
   it('setToken rejects empty token', () => {
     const c = new TesserClient(baseConfig);
     expect(() => c.setToken('')).toThrow(TesserConfigError);
+  });
+
+  it('constructor trims surrounding whitespace from token', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ address: '0xab' }), { status: 200 }));
+    const c = new TesserClient({
+      ...baseConfig,
+      token: '  tok-with-newline\n',
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    await c.getAccountAddress('acc_1');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer tok-with-newline');
+  });
+
+  it('constructor rejects an all-whitespace token', () => {
+    expect(() => new TesserClient({ ...baseConfig, token: '   \n' })).toThrow(TesserConfigError);
+  });
+
+  it('setToken trims whitespace and rejects all-whitespace input', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ address: '0xab' }), { status: 200 }));
+    const c = new TesserClient({
+      ...baseConfig,
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    c.setToken('  rotated\n');
+    await c.getAccountAddress('acc_1');
+    expect(
+      new Headers((fetchMock.mock.calls[0]?.[1] as RequestInit).headers).get('authorization'),
+    ).toBe('Bearer rotated');
+
+    expect(() => c.setToken('   \n')).toThrow(TesserConfigError);
   });
 
   it('logLevel: constructor option overrides TESSER_LOG env var', () => {
