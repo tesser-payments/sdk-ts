@@ -21,6 +21,15 @@ describe('TesserClient', () => {
     expect(() => new TesserClient({ ...baseConfig, token: '' })).toThrow(TesserConfigError);
   });
 
+  it.each([
+    ['empty string', ''],
+    ['whitespace only', '   '],
+    ['only slashes', '///'],
+    ['whitespace and slashes', '  /  '],
+  ])('throws TesserConfigError when baseUrl is %s', (_label, value) => {
+    expect(() => new TesserClient({ ...baseConfig, baseUrl: value })).toThrow(TesserConfigError);
+  });
+
   it('throws TesserConfigError on incomplete signing config', () => {
     expect(
       () =>

@@ -61,7 +61,16 @@ export class TesserClient {
     }
 
     this.#token = token;
-    this.baseUrl = (config.baseUrl ?? 'https://api.tesser.xyz').trim().replace(/\/+$/, '');
+
+    const baseUrlCandidate = (config.baseUrl ?? 'https://api.tesser.xyz')
+      .trim()
+      .replace(/\/+$/, '');
+    if (config.baseUrl !== undefined && baseUrlCandidate === '') {
+      throw new TesserConfigError(
+        'TesserClient: baseUrl must not be blank when provided (got an empty string, whitespace, or only slashes)',
+      );
+    }
+    this.baseUrl = baseUrlCandidate;
     this.signing = Object.freeze({ ...s });
     this.timeout = config.timeout ?? 30_000;
     this.maxRetries = config.maxRetries ?? 2;
