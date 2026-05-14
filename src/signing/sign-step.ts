@@ -3,8 +3,8 @@
 // Builds Turnkey ACTIVITY_TYPE_SIGN_TRANSACTION_V2 payload and stamps it.
 
 import type {
-  SignedStepResult,
   SignStepOptions,
+  SignedStepResult,
   SigningConfig,
   StepForSigning,
 } from '../internal/types.js';

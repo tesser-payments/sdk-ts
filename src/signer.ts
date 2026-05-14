@@ -3,9 +3,9 @@ import { TesserConfigError } from './internal/errors.js';
 import type {
   CreateWalletParams,
   LocalSignerOptions,
+  SignStepOptions,
   SignedResult,
   SignedStepResult,
-  SignStepOptions,
   SigningConfig,
   StepForSigning,
 } from './internal/types.js';

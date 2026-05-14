@@ -64,12 +64,13 @@ export interface SignedStepResult {
   metadata: SignedStepResultMetadata;
 }
 
-export interface SignStepOptions {
-  // Empty in v0.0.1. Reserved for future per-call options:
-  //   signal?: AbortSignal;
-  //   timeout?: number;
-  //   maxRetries?: number;
-}
+/**
+ * Per-call options for `signStep`. Empty in v0.0.1; reserved for future
+ * options such as `signal?: AbortSignal`, `timeout?: number`,
+ * `maxRetries?: number`. Defined as a `Record<string, never>` so the
+ * empty-object type doesn't trip Biome's `noBannedTypes` rule.
+ */
+export type SignStepOptions = Record<string, never>;
 
 export interface LocalSignerOptions {
   signing: SigningConfig;
