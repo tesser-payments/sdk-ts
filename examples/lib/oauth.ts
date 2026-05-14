@@ -1,8 +1,9 @@
-// examples/lib/access-token.ts
+// examples/lib/oauth.ts
 //
 // Shared OAuth `client_credentials` token helper for examples/.
 // The SDK itself does not implement OAuth — example scripts (and downstream
-// consumers) handle token lifecycle and pass a fresh bearer to TesserClient.
+// consumers) handle token lifecycle and pass a fresh bearer when calling
+// Tesser API endpoints.
 //
 // Default token URL: https://auth.tesser.xyz/oauth/token (per
 // https://docs.tesser.xyz/overviews/authentication). Override with

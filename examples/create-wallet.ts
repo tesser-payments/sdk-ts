@@ -7,7 +7,7 @@
 // and fill in the values before running.
 
 import { LocalSigner, TesserClient, type WalletType } from '../src/index.js';
-import { getAccessToken } from './lib/access-token.js';
+import { getAccessToken } from './lib/oauth.js';
 import { requireEnv } from './lib/require-env.js';
 
 const REQUIRED_ENV = [
