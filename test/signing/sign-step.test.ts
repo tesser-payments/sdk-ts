@@ -81,8 +81,8 @@ describe('signStep', () => {
   });
 
   it('throws TesserConfigError for unsupported network', async () => {
-    await expect(
-      signStep(signing, { ...baseStep, network: 'NOPE' }, {}),
-    ).rejects.toBeInstanceOf(TesserConfigError);
+    await expect(signStep(signing, { ...baseStep, network: 'NOPE' }, {})).rejects.toBeInstanceOf(
+      TesserConfigError,
+    );
   });
 });
