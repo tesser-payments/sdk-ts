@@ -1,61 +1,87 @@
-// test/signer.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { TesserClient } from '../src/client.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TesserConfigError } from '../src/internal/errors.js';
+import type { SigningConfig, StepForSigning } from '../src/internal/types.js';
 import { LocalSigner } from '../src/signer.js';
+import * as createWalletModule from '../src/signing/create-wallet.js';
+import * as signStepModule from '../src/signing/sign-step.js';
 
-const signCreateWalletMock = vi.hoisted(() => vi.fn());
-vi.mock('../src/signing/create-wallet.js', () => ({ signCreateWallet: signCreateWalletMock }));
-
-const clientCfg = {
-  token: 'tok',
-  signing: { publicKey: 'pk', privateKey: 'sk', enclaveId: 'org' },
+const signing: SigningConfig = {
+  publicKey: '02'.padEnd(66, 'a'),
+  privateKey: 'b'.repeat(64),
+  enclaveId: 'org_test',
 };
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('LocalSigner', () => {
-  beforeEach(() => {
-    signCreateWalletMock.mockReset();
-    signCreateWalletMock.mockResolvedValue({
+  it('constructs with valid options', () => {
+    const s = new LocalSigner({ signing });
+    expect(s.signing.publicKey).toBe(signing.publicKey);
+    expect(s.signing.enclaveId).toBe(signing.enclaveId);
+  });
+
+  it('freezes signing config', () => {
+    const s = new LocalSigner({ signing });
+    expect(() => {
+      // biome-ignore lint/suspicious/noExplicitAny: testing runtime freeze
+      (s.signing as any).publicKey = 'mutated';
+    }).toThrow();
+  });
+
+  it.each([
+    ['blank publicKey', { ...signing, publicKey: '' }],
+    ['blank privateKey', { ...signing, privateKey: '' }],
+    ['blank enclaveId', { ...signing, enclaveId: '' }],
+  ])('throws TesserConfigError on %s', (_label, bad) => {
+    expect(() => new LocalSigner({ signing: bad })).toThrow(TesserConfigError);
+  });
+
+  it('signCreateWallet delegates to signing/create-wallet', async () => {
+    const spy = vi.spyOn(createWalletModule, 'signCreateWallet').mockResolvedValue({
       signature: 'sig',
-      metadata: { stampHeaderName: 'X', stampHeaderValue: 'sig', body: '{}' },
+      metadata: { stampHeaderName: 'X-Stamp', stampHeaderValue: 'v', body: '{}' },
     });
+    const s = new LocalSigner({ signing });
+    await s.signCreateWallet({ name: 'w', type: 'stablecoin_ethereum' });
+    expect(spy).toHaveBeenCalledWith(signing, { name: 'w', type: 'stablecoin_ethereum' });
   });
 
-  it('reads signing config from the client by default', async () => {
-    const client = new TesserClient(clientCfg);
-    const signer = new LocalSigner(client);
-    await signer.signCreateWallet({ name: 'A', type: 'stablecoin_ethereum' });
-    expect(signCreateWalletMock).toHaveBeenCalledWith(
-      { publicKey: 'pk', privateKey: 'sk', enclaveId: 'org' },
-      { name: 'A', type: 'stablecoin_ethereum' },
-    );
+  it('signStep delegates to signing/sign-step', async () => {
+    const step: StepForSigning = {
+      id: 's',
+      transferId: 't',
+      unsignedTransaction: '0x',
+      signWith: '0xa',
+      network: 'BASE',
+    };
+    const spy = vi.spyOn(signStepModule, 'signStep').mockResolvedValue({
+      signature: 'sig',
+      unsignedTransaction: '0x',
+      metadata: { stampHeaderName: 'X-Stamp', stampHeaderValue: 'v', body: '{}' },
+    });
+    const s = new LocalSigner({ signing });
+    await s.signStep(step);
+    expect(spy).toHaveBeenCalledWith(signing, step, {});
   });
 
-  it('uses override signing config when provided', async () => {
-    const client = new TesserClient(clientCfg);
-    const override = { publicKey: 'PK2', privateKey: 'SK2', enclaveId: 'ORG2' };
-    const signer = new LocalSigner(client, override);
-    await signer.signCreateWallet({ name: 'A', type: 'stablecoin_ethereum' });
-    expect(signCreateWalletMock).toHaveBeenCalledWith(override, expect.any(Object));
-  });
-
-  it('rejects partial signing override (must be complete)', () => {
-    const client = new TesserClient(clientCfg);
-    expect(
-      () =>
-        new LocalSigner(client, {
-          publicKey: 'PK',
-          privateKey: '',
-          enclaveId: 'ORG',
-        }),
-    ).toThrow(TesserConfigError);
-  });
-
-  it('signCreateWallet returns the SignedResult from the underlying call', async () => {
-    const client = new TesserClient(clientCfg);
-    const signer = new LocalSigner(client);
-    const r = await signer.signCreateWallet({ name: 'A', type: 'stablecoin_solana' });
-    expect(r.signature).toBe('sig');
-    expect(r.metadata.body).toBe('{}');
+  it('signStep passes through opts when provided', async () => {
+    const step: StepForSigning = {
+      id: 's',
+      transferId: 't',
+      unsignedTransaction: '0x',
+      signWith: '0xa',
+      network: 'BASE',
+    };
+    const spy = vi.spyOn(signStepModule, 'signStep').mockResolvedValue({
+      signature: 'sig',
+      unsignedTransaction: '0x',
+      metadata: { stampHeaderName: 'X-Stamp', stampHeaderValue: 'v', body: '{}' },
+    });
+    const s = new LocalSigner({ signing });
+    const opts = {};
+    await s.signStep(step, opts);
+    expect(spy).toHaveBeenCalledWith(signing, step, opts);
   });
 });
