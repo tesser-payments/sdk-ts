@@ -1,48 +1,25 @@
 # @tesser-payments/sdk
 
-A barebones TypeScript SDK for signing Tesser API operations with locally-held
-Turnkey API keys.
-
-## Status
-
-Early checkpoint for foundational review. The SDK can:
-
-- Construct a `TesserClient` from a bearer token plus signing config.
-- Resolve account-id → on-chain address via `TesserClient.getAccountAddress`.
-- Produce stamped wallet-creation signatures via
-  `LocalSigner.signCreateWallet({ name, type })`. End-to-end verified
-  against Tesser staging when the registered API key matches the format
-  Turnkey expects (see [Setup notes](#setup-notes)).
-
-Not yet implemented (planned next):
-
-- `LocalSigner.signStep` for ERC-20 payouts (viem-driven tx construction,
-  drpc-fallback RPC resolution, per-network token-address tables).
-
-Out of scope for v0.0.1:
-
-- OAuth `client_credentials` flow — the example script in `examples/`
-  demonstrates the handshake; consumers handle token lifecycle and pass
-  a fresh bearer to `TesserClient`.
-- Webhook signature verification.
-- Browser, edge, or React Native runtimes.
+Signer-only TypeScript SDK for Tesser API: locally stamp `signCreateWallet` and
+`signStep` activities using Turnkey API keys. The SDK does not own HTTP or
+OAuth — Tesser API supplies the unsigned transaction; this library only stamps
+it. Bring your own client.
 
 ## Install
 
 ```sh
-bun add @tesser-payments/sdk @tesser-payments/types @turnkey/api-key-stamper viem
+bun add @tesser-payments/sdk @turnkey/api-key-stamper @tesser-payments/types
 ```
 
-The three peer dependencies are platform libraries you most likely already
-have. `p-retry` is the only direct dependency.
+Both `@turnkey/api-key-stamper` and `@tesser-payments/types` are peer
+dependencies (no runtime dependencies of our own). Apache 2.0 licensed.
 
 ## Quick start
 
 ```typescript
-import { LocalSigner, TesserClient } from '@tesser-payments/sdk';
+import { LocalSigner } from '@tesser-payments/sdk';
 
-const tesser = new TesserClient({
-  token: await getAccessToken(), // your OAuth flow; SDK does not own this
+const signer = new LocalSigner({
   signing: {
     publicKey: process.env.SIGNING_PUBLIC_KEY!,   // 33-byte compressed P-256
     privateKey: process.env.SIGNING_PRIVATE_KEY!,
@@ -50,47 +27,73 @@ const tesser = new TesserClient({
   },
 });
 
-// Refresh anytime your OAuth helper hands you a new bearer:
-tesser.setToken(await getAccessToken());
-
-const signer = new LocalSigner(tesser);
-
-const signed = await signer.signCreateWallet({
+const { signature } = await signer.signCreateWallet({
   name: 'My new wallet',
   type: 'stablecoin_ethereum',
 });
 
-// signed.signature is base64(JSON.stringify({ body, stamp })) — pass
-// straight to Tesser's POST /v1/accounts/wallets request body.
+const res = await fetch(`${API_BASE_URL}/v1/accounts/wallets`, {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    signature,
+    name: 'My new wallet',
+    type: 'stablecoin_ethereum',
+    is_managed: true,
+  }),
+});
 ```
 
-A complete reference implementation including the OAuth handshake lives at
-[`examples/create-wallet.ts`](./examples/create-wallet.ts).
+`signature` is `base64(JSON.stringify({ body, stamp }))` — drop it into the
+Tesser API request body as the documented `signature` field.
 
-## Configuration
+## `signStep`
 
-`new TesserClient(config)` accepts:
+`signStep` stamps a Turnkey `ACTIVITY_TYPE_SIGN_TRANSACTION_V2` body for a
+single rebalance step. Pass the step UUID, the unsigned transaction Tesser
+returned, the on-chain `signWith` address, and the network:
 
-| Option | Default | Notes |
-|---|---|---|
-| `token` | — (required) | Bearer token. Refresh via `setToken`. |
-| `signing` | — (required) | `{ publicKey, privateKey, enclaveId }`. `publicKey` must be 33-byte compressed P-256 (66 hex chars, prefix `02` or `03`). |
-| `baseUrl` | `https://api.tesser.xyz` | Override for staging. Trailing slashes and surrounding whitespace are stripped. |
-| `rpcUrls` | `{}` | Per-network RPC URL map. Reserved for `signStep`; unused at the current checkpoint. |
-| `timeout` | `30_000` ms | Per-request HTTP timeout. Override per call via `RequestOptions.timeout`. |
-| `maxRetries` | `2` | Retries on `408`/`409`/`429`/`5xx` and connection errors. |
-| `fetch` | `globalThis.fetch` | Inject a custom fetch (testing, proxies). |
-| `logger` | console-based | Any object with `debug`/`info`/`warn`/`error` methods works (pino, winston, bunyan, console). |
-| `logLevel` | `'warn'` | `'debug' \| 'info' \| 'warn' \| 'error' \| 'off'`. Overrides `TESSER_LOG` env var when set. |
+```typescript
+import { LocalSigner, type StepForSigning } from '@tesser-payments/sdk';
 
-`signing` is frozen after construction. To change RPC URLs, signing
-config, or transport settings, build a new client.
+const step: StepForSigning = {
+  id: 'step_abc',                      // step UUID
+  transferId: 'rebalance_xyz',         // parent rebalance UUID
+                                       //   (webhook payloads: data.object.rebalance_id;
+                                       //    GET-rebalance:    step.transfer_id)
+  unsignedTransaction: '0x02...',      // hex-encoded raw tx Tesser returned
+  signWith: '0xabc...',                // account.crypto_wallet_address from
+                                       //   GET /v1/accounts/{from_account_id}
+  network: 'BASE_SEPOLIA',             // BASE | BASE_SEPOLIA | ETHEREUM |
+                                       //   POLYGON | POLYGON_AMOY | SOLANA
+};
 
-## Errors
+const signed = await signer.signStep(step);
+
+// POST /v1/treasury/rebalances/{transferId}/steps/{id}/sign
+await fetch(
+  `${API_BASE_URL}/v1/treasury/rebalances/${step.transferId}/steps/${step.id}/sign`,
+  {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signature: signed.signature }),
+  },
+);
+```
+
+`signStep` returns `{ signature, unsignedTransaction, metadata }`. The
+`unsignedTransaction` is an echo of the input — handy for caller-side
+logging.
+
+## Error handling
 
 The SDK mirrors Tesser's documented error envelope
-(see <https://docs.tesser.xyz/overviews/errors>) rather than inventing its
-own taxonomy of HTTP statuses.
+(<https://docs.tesser.xyz/overviews/errors>) rather than inventing a custom
+HTTP-status taxonomy. The full hierarchy is exported so consumers can branch
+on `instanceof`:
 
 ```
 TesserError                       (base; .cause set on all)
@@ -104,23 +107,20 @@ TesserError                       (base; .cause set on all)
     └── StampError                Turnkey ApiKeyStamper failed
 ```
 
-`TesserAPIError` carries the parsed `errors[]` array from Tesser's
-response body. Branch on `errorCode` (Tesser's documented
-`{domain}-{YZZZ}` codes) for fine-grained handling, on `status` for
-broad category:
+v0.0.1 only throws `TesserConfigError`, `TesserSigningError`, and
+`StampError` directly — the rest are exported now so consumer code that
+catches `TesserAPIError` (from its own HTTP layer) stays compatible when a
+future version adds an optional bundled client.
 
 ```typescript
 import { TesserAPIError } from '@tesser-payments/sdk';
 
 try {
-  await signer.signCreateWallet({ name, type });
+  // ... your fetch call ...
 } catch (err) {
   if (TesserAPIError.is(err)) {
     if (err.hasCode('accounts-3005')) {
-      // Turnkey stamp rejected — re-issue the API key registration.
-    }
-    if (err.status === 429) {
-      // Retry budget exhausted — back off and re-attempt.
+      // Turnkey stamp rejected — re-register the API key.
     }
     console.error('Tesser API failure', {
       status: err.status,
@@ -133,30 +133,14 @@ try {
 ```
 
 `err.errorCode` is a convenience for `err.errors[0]?.errorCode`.
-Non-Tesser-shaped responses (Cloudflare 502 pages, plain-text 503s) yield
-`errors: []`; the original body lands in `err.message`.
-
-## Examples
-
-| Path | What it demonstrates |
-|---|---|
-| `examples/create-wallet.ts` | End-to-end: OAuth handshake, `TesserClient` + `LocalSigner` construction, `signCreateWallet`, and the wallet-creation POST to Tesser. Doubles as the manual verification harness. |
-| `examples/lib/access-token.ts` | OAuth `client_credentials` helper. Reusable across future scripts; reads `AUTH_TOKEN_URL` env var or accepts an explicit override. |
-| `examples/lib/require-env.ts` | Generic typed env-validation helper. |
-
-Run with: `bun run examples/create-wallet.ts`. Bun loads `.env.local`
-automatically. Copy [`.env.example`](./.env.example) and fill in the
-values before running.
 
 ## Setup notes
 
-The SDK requires `signing.publicKey` to be the **33-byte compressed**
-form Turnkey uses for API-key auth lookups (66 hex chars, prefix `02`
-or `03`). If you copy the public key from a dashboard that displays the
-65-byte uncompressed form, compress it first:
+`signing.publicKey` must be the **33-byte compressed** form Turnkey uses for
+API-key auth lookups (66 hex chars, prefix `02` or `03`). Dashboards that
+display the 65-byte uncompressed form need to be compressed before use:
 
 ```sh
-# Using @turnkey/crypto, which also installs transitively:
 bunx -p @turnkey/crypto node -e \
   'const c = require("@turnkey/crypto"); \
    const u = process.argv[1].replace(/^0x/i,""); \
@@ -165,10 +149,32 @@ bunx -p @turnkey/crypto node -e \
   04...your-uncompressed-key...
 ```
 
-If a key registered through a dashboard "Generate Key" flow is stored
-in uncompressed form on Turnkey's side, Turnkey will reject auth with
-`PUBLIC_KEY_NOT_FOUND` even though the keypair is logically correct —
-register the key in compressed form to fix.
+If a key is registered on Turnkey in uncompressed form, Turnkey rejects
+auth with `PUBLIC_KEY_NOT_FOUND` even when the keypair is logically
+correct — re-register the key in compressed form to fix.
+
+## Examples
+
+| Path | What it demonstrates |
+|---|---|
+| [`examples/create-wallet.ts`](./examples/create-wallet.ts) | OAuth → `signCreateWallet` → `POST /v1/accounts/wallets`. Doubles as the manual verification harness. |
+| [`examples/sign-step-polling.ts`](./examples/sign-step-polling.ts) | End-to-end rebalance signing driven by `GET /v1/treasury/rebalances/{id}` polling. |
+| [`examples/sign-step-webhooks.ts`](./examples/sign-step-webhooks.ts) | End-to-end rebalance signing driven by Tesser `step.*` webhooks. Best-effort: webhook signature verification is **not** wired up (the algorithm isn't currently documented), so do not run this against production. |
+| [`examples/lib/oauth.ts`](./examples/lib/oauth.ts) | Shared `client_credentials` token helper for the three scripts above. |
+| [`examples/lib/require-env.ts`](./examples/lib/require-env.ts) | Typed env-validation helper. |
+
+Run with `bun run examples/<name>.ts`. Bun loads `.env.local` automatically;
+copy [`.env.example`](./.env.example) and fill in the values first.
+
+## Out of scope
+
+- **`TesserClient`** — the previous bundled HTTP client (`getAccountAddress`,
+  retry/timeout/logger plumbing) is intentionally not in v0.0.1. We expect to
+  re-add it later as an opt-in `LocalSignerOptions.client` field; that change
+  is purely additive and will not break v0.0.1 call sites.
+- **Webhook signature verification** — the header name and HMAC algorithm
+  aren't currently documented in public Tesser docs.
+- **Browser, edge, and React Native runtimes** — Node ≥ 18 / Bun ≥ 1.1 only.
 
 ## Development
 
@@ -177,38 +183,18 @@ bun install
 bun run typecheck     # tsc --noEmit
 bun run lint          # biome check .
 bun run lint:fix      # biome check . --write
-bun run test          # vitest
+bun run test          # vitest run
 bun run test:watch
 bun run build         # bun build (JS) + tsc --emitDeclarationOnly (.d.ts)
 ```
 
-The build emits `dist/index.js` (ESM) and `dist/index.d.ts`. `@internal`-
-tagged accessors are stripped from the published declarations via
-`stripInternal: true` in `tsconfig.build.json`.
+Conventional commits. Changesets manage versions and the changelog
+(`.changeset/`); see [`CHANGELOG.md`](./CHANGELOG.md). Release via
+`bun run release`.
 
 CI runs typecheck, lint, test, build on every PR (see
-`.github/workflows/ci.yml`). Concurrency-cancel is enabled for
-pull-request events.
+`.github/workflows/ci.yml`).
 
-## Repository layout
+## License
 
-```
-src/
-├── index.ts          public barrel
-├── client.ts         TesserClient — config, setToken, getAccountAddress
-├── signer.ts         LocalSigner — signCreateWallet (signStep planned)
-├── signing/
-│   ├── stamp.ts      thin @turnkey/api-key-stamper wrapper
-│   └── create-wallet.ts
-└── internal/
-    ├── errors.ts     full hierarchy with Tesser errors[] envelope
-    ├── http.ts       fetchWithRetry: timeout, retry, error mapping
-    ├── logger.ts     duck-typed Logger + recursive redactor
-    └── types.ts      SDK-local types
-examples/
-├── create-wallet.ts  E2E reference + verification harness
-└── lib/
-    ├── access-token.ts
-    └── require-env.ts
-test/                 vitest specs mirroring src/
-```
+[Apache License 2.0](./LICENSE). See [`NOTICE`](./NOTICE).
