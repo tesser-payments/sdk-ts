@@ -1,28 +1,27 @@
-// src/index.ts
-
-// Classes
-export { TesserClient, type TesserClientConfig } from './client.js';
+// src/index.ts — public API surface for @tesser-payments/sdk
 export { LocalSigner } from './signer.js';
 
-// Errors
+export type {
+  CreateWalletParams,
+  LocalSignerOptions,
+  SignedResult,
+  SignedResultMetadata,
+  SignedStepResult,
+  SignedStepResultMetadata,
+  SignStepOptions,
+  SigningConfig,
+  StepForSigning,
+  WalletType,
+} from './internal/types.js';
+
 export {
   StampError,
   TesserAPIError,
   TesserConfigError,
   TesserConnectionError,
   TesserError,
-  type TesserErrorDetail,
   TesserSigningError,
   TesserTimeoutError,
 } from './internal/errors.js';
 
-// Types
-export type {
-  Logger,
-  LogLevel,
-  RequestOptions,
-  RpcUrls,
-  SignedResult,
-  SigningConfig,
-  WalletType,
-} from './internal/types.js';
+export type { TesserErrorDetail } from './internal/errors.js';
