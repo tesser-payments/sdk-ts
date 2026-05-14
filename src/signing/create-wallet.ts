@@ -1,6 +1,11 @@
 // src/signing/create-wallet.ts
 import { TesserConfigError } from '../internal/errors.js';
-import type { SignedResult, SigningConfig, WalletType } from '../internal/types.js';
+import type {
+  CreateWalletParams,
+  SignedResult,
+  SigningConfig,
+  WalletType,
+} from '../internal/types.js';
 import { stamp } from './stamp.js';
 
 type Curve = 'CURVE_SECP256K1' | 'CURVE_ED25519';
@@ -43,11 +48,6 @@ const WALLET_TYPE_ACCOUNTS: Record<WalletType, AccountSpec[]> = {
     },
   ],
 };
-
-export interface CreateWalletParams {
-  name: string;
-  type: WalletType;
-}
 
 const VALID_WALLET_TYPES = Object.keys(WALLET_TYPE_ACCOUNTS) as WalletType[];
 
