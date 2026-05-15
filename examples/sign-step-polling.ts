@@ -15,7 +15,7 @@
 //   8. Print final summary
 import { LocalSigner, type StepForSigning } from '../src/index.js';
 import { getAccessToken } from './lib/oauth.js';
-import { requireEnv } from './lib/require-env.js';
+import { optionalEnv, requireEnv } from './lib/require-env.js';
 
 const env = requireEnv([
   'API_BASE_URL',
@@ -26,13 +26,14 @@ const env = requireEnv([
   'SIGNING_PRIVATE_KEY',
   'SIGNING_ENCLAVE_ID',
   'FROM_ACCOUNT_ID',
-  'FROM_AMOUNT',
-  'FROM_CURRENCY',
-  'FROM_NETWORK',
   'TO_ACCOUNT_ID',
-  'TO_CURRENCY',
-  'TO_NETWORK',
 ] as const);
+
+const FROM_AMOUNT = optionalEnv('FROM_AMOUNT', '0.000001');
+const FROM_CURRENCY = optionalEnv('FROM_CURRENCY', 'USDC');
+const FROM_NETWORK = optionalEnv('FROM_NETWORK', 'BASE_SEPOLIA');
+const TO_CURRENCY = optionalEnv('TO_CURRENCY', 'USDC');
+const TO_NETWORK = optionalEnv('TO_NETWORK', 'BASE_SEPOLIA');
 
 const SIGNATURE_REQUESTED_TIMEOUT_MS = 2 * 60 * 1000;
 const COMPLETED_TIMEOUT_MS = 5 * 60 * 1000;
@@ -64,28 +65,31 @@ async function jsonOrThrow(res: Response, ctx: string): Promise<any> {
   return JSON.parse(text);
 }
 
-const token = await getAccessToken(env.AUTH_TOKEN_URL, env.API_CLIENT_ID, env.API_CLIENT_SECRET);
+const token = await getAccessToken(env.API_BASE_URL, env.API_CLIENT_ID, env.API_CLIENT_SECRET);
 
 console.log('Creating rebalance...');
 const rebalanceRes = await authedFetch(`${env.API_BASE_URL}/v1/treasury/rebalances`, {
   method: 'POST',
   body: JSON.stringify({
-    from: {
-      account_id: env.FROM_ACCOUNT_ID,
-      amount: env.FROM_AMOUNT,
-      currency: env.FROM_CURRENCY,
-      network: env.FROM_NETWORK,
-    },
-    to: {
-      account_id: env.TO_ACCOUNT_ID,
-      currency: env.TO_CURRENCY,
-      network: env.TO_NETWORK,
+    desired: {
+      from: {
+        account_id: env.FROM_ACCOUNT_ID,
+        amount: FROM_AMOUNT,
+        currency: FROM_CURRENCY,
+        network: FROM_NETWORK,
+      },
+      to: {
+        account_id: env.TO_ACCOUNT_ID,
+        currency: TO_CURRENCY,
+        network: TO_NETWORK,
+      },
     },
   }),
   token,
 });
 const rebalance = await jsonOrThrow(rebalanceRes, 'POST /v1/treasury/rebalances');
-const rebalanceId: string = rebalance.id;
+const rebalanceId: string = rebalance.data?.id ?? rebalance.id;
+if (!rebalanceId) throw new Error(`Rebalance response missing id: ${JSON.stringify(rebalance)}`);
 console.log(`Rebalance ${rebalanceId} created`);
 
 console.log('Polling until status=signature_requested ...');
@@ -96,7 +100,7 @@ while (Date.now() < sigDeadline) {
   const r = await authedFetch(`${env.API_BASE_URL}/v1/treasury/rebalances/${rebalanceId}`, {
     token,
   });
-  const rb = await jsonOrThrow(r, `GET rebalance ${rebalanceId}`);
+  const rb = (await jsonOrThrow(r, `GET rebalance ${rebalanceId}`)).data ?? {};
   // biome-ignore lint/suspicious/noExplicitAny: see above
   const steps: any[] = rb.steps ?? [];
   pendingStep = steps.find(
@@ -119,7 +123,7 @@ const acctRes = await authedFetch(
   { token },
 );
 const acct = await jsonOrThrow(acctRes, `GET /v1/accounts/${env.FROM_ACCOUNT_ID}`);
-const signWith: string = acct.crypto_wallet_address;
+const signWith: string = acct.data?.crypto_wallet_address ?? acct.crypto_wallet_address;
 if (!signWith) throw new Error('account.crypto_wallet_address missing');
 
 const signer = new LocalSigner({
@@ -135,7 +139,7 @@ const stepForSigning: StepForSigning = {
   transferId: rebalanceId,
   unsignedTransaction: pendingStep.unsigned_transaction,
   signWith,
-  network: env.FROM_NETWORK,
+  network: FROM_NETWORK,
 };
 
 console.log('Signing step locally ...');
@@ -157,7 +161,7 @@ while (Date.now() < completedDeadline) {
   const r = await authedFetch(`${env.API_BASE_URL}/v1/treasury/rebalances/${rebalanceId}`, {
     token,
   });
-  const rb = await jsonOrThrow(r, `GET rebalance ${rebalanceId}`);
+  const rb = (await jsonOrThrow(r, `GET rebalance ${rebalanceId}`)).data ?? {};
   // biome-ignore lint/suspicious/noExplicitAny: see above
   const step = (rb.steps ?? []).find((s: any) => s.id === pendingStep.id);
   if (!step) throw new Error(`Step ${pendingStep.id} disappeared from rebalance`);

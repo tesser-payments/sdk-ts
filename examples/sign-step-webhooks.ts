@@ -10,7 +10,7 @@
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { LocalSigner, type StepForSigning } from '../src/index.js';
 import { getAccessToken } from './lib/oauth.js';
-import { requireEnv } from './lib/require-env.js';
+import { optionalEnv, requireEnv } from './lib/require-env.js';
 
 const env = requireEnv([
   'API_BASE_URL',
@@ -21,14 +21,15 @@ const env = requireEnv([
   'SIGNING_PRIVATE_KEY',
   'SIGNING_ENCLAVE_ID',
   'FROM_ACCOUNT_ID',
-  'FROM_AMOUNT',
-  'FROM_CURRENCY',
-  'FROM_NETWORK',
   'TO_ACCOUNT_ID',
-  'TO_CURRENCY',
-  'TO_NETWORK',
-  'WEBHOOK_PORT',
 ] as const);
+
+const FROM_AMOUNT = optionalEnv('FROM_AMOUNT', '0.000001');
+const FROM_CURRENCY = optionalEnv('FROM_CURRENCY', 'USDC');
+const FROM_NETWORK = optionalEnv('FROM_NETWORK', 'BASE_SEPOLIA');
+const TO_CURRENCY = optionalEnv('TO_CURRENCY', 'USDC');
+const TO_NETWORK = optionalEnv('TO_NETWORK', 'BASE_SEPOLIA');
+const WEBHOOK_PORT = optionalEnv('WEBHOOK_PORT', '8787');
 
 // biome-ignore lint/suspicious/noExplicitAny: webhook envelope shape varies per event
 type WebhookEnvelope = Record<string, any>;
@@ -57,10 +58,12 @@ class WebhookListener {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const remaining = deadline - Date.now();
-      const next = await Promise.race([
-        this.receive(),
-        new Promise<null>((r) => setTimeout(() => r(null), remaining)),
-      ]);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<null>((r) => {
+        timer = setTimeout(() => r(null), remaining);
+      });
+      const next = await Promise.race([this.receive(), timeout]);
+      clearTimeout(timer);
       if (next === null) break;
       if (predicate(next)) return next;
       console.log(
@@ -98,11 +101,11 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   });
 });
 
-const port = Number.parseInt(env.WEBHOOK_PORT, 10);
+const port = Number.parseInt(WEBHOOK_PORT, 10);
 server.listen(port, () => console.log(`Webhook listener on :${port}`));
 
 try {
-  const token = await getAccessToken(env.AUTH_TOKEN_URL, env.API_CLIENT_ID, env.API_CLIENT_SECRET);
+  const token = await getAccessToken(env.API_BASE_URL, env.API_CLIENT_ID, env.API_CLIENT_SECRET);
 
   console.log('Creating rebalance ...');
   const rebRes = await fetch(`${env.API_BASE_URL}/v1/treasury/rebalances`, {
@@ -113,16 +116,18 @@ try {
       Accept: 'application/json',
     },
     body: JSON.stringify({
-      from: {
-        account_id: env.FROM_ACCOUNT_ID,
-        amount: env.FROM_AMOUNT,
-        currency: env.FROM_CURRENCY,
-        network: env.FROM_NETWORK,
-      },
-      to: {
-        account_id: env.TO_ACCOUNT_ID,
-        currency: env.TO_CURRENCY,
-        network: env.TO_NETWORK,
+      desired: {
+        from: {
+          account_id: env.FROM_ACCOUNT_ID,
+          amount: FROM_AMOUNT,
+          currency: FROM_CURRENCY,
+          network: FROM_NETWORK,
+        },
+        to: {
+          account_id: env.TO_ACCOUNT_ID,
+          currency: TO_CURRENCY,
+          network: TO_NETWORK,
+        },
       },
     }),
   });
@@ -131,7 +136,8 @@ try {
   }
   // biome-ignore lint/suspicious/noExplicitAny: API response shape mirrors Tesser docs
   const rebalance: any = await rebRes.json();
-  const rebalanceId: string = rebalance.id;
+  const rebalanceId: string = rebalance.data?.id ?? rebalance.id;
+  if (!rebalanceId) throw new Error(`Rebalance response missing id: ${JSON.stringify(rebalance)}`);
   console.log(`Rebalance ${rebalanceId} created; awaiting step.signature_requested ...`);
 
   const sigEnvelope = await listener.awaitEventWhere(
@@ -152,7 +158,7 @@ try {
   }
   // biome-ignore lint/suspicious/noExplicitAny: see above
   const acct: any = await acctRes.json();
-  const signWith: string = acct.crypto_wallet_address;
+  const signWith: string = acct.data?.crypto_wallet_address ?? acct.crypto_wallet_address;
   if (!signWith) throw new Error('account.crypto_wallet_address missing');
 
   const signer = new LocalSigner({
@@ -172,7 +178,7 @@ try {
     transferId,
     unsignedTransaction: stepObj.unsigned_transaction,
     signWith,
-    network: env.FROM_NETWORK,
+    network: FROM_NETWORK,
   };
 
   console.log('Signing locally ...');
@@ -206,5 +212,6 @@ try {
     `Rebalance complete. step.id=${completedStep.id} status=${completedStep.status} completed_at=${completedStep.completed_at}`,
   );
 } finally {
+  server.closeAllConnections();
   server.close();
 }

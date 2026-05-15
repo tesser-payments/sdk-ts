@@ -1,8 +1,8 @@
 // examples/lib/require-env.ts
 //
-// Shared env-validation helper for examples/. Asserts every key in `keys` is
-// set to a non-empty string and returns a typed record. Prints a clear error
-// and exits non-zero if any are missing.
+// Shared env-validation helpers for examples/. `requireEnv` asserts every key
+// is set to a non-empty string and returns a typed record. `optionalEnv`
+// returns the env value if non-empty, else the supplied fallback.
 
 export function requireEnv<const T extends readonly string[]>(keys: T): Record<T[number], string> {
   const missing: string[] = [];
@@ -17,4 +17,9 @@ export function requireEnv<const T extends readonly string[]>(keys: T): Record<T
     process.exit(1);
   }
   return out as Record<T[number], string>;
+}
+
+export function optionalEnv(name: string, fallback: string): string {
+  const v = process.env[name];
+  return v && v.length > 0 ? v : fallback;
 }

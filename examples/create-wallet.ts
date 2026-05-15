@@ -26,7 +26,7 @@ const env = requireEnv([
 const walletType = env.CREATE_WALLET_TYPE as WalletType;
 const walletName = `example-${Date.now()}`;
 
-const token = await getAccessToken(env.AUTH_TOKEN_URL, env.API_CLIENT_ID, env.API_CLIENT_SECRET);
+const token = await getAccessToken(env.API_BASE_URL, env.API_CLIENT_ID, env.API_CLIENT_SECRET);
 
 const signer = new LocalSigner({
   signing: {
