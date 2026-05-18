@@ -11,8 +11,6 @@ const signing: SigningConfig = {
 };
 
 const baseStep: StepForSigning = {
-  id: 'step_1',
-  transferId: 'rb_1',
   unsignedTransaction: '0x02deadbeef',
   signWith: '0xabc',
   network: 'BASE_SEPOLIA',
@@ -32,7 +30,7 @@ afterEach(() => {
 
 describe('signStep', () => {
   it('builds ACTIVITY_TYPE_SIGN_TRANSACTION_V2 body with correct fields', async () => {
-    const result = await signStep(signing, baseStep, {});
+    const result = await signStep(signing, baseStep);
 
     const parsedBody = JSON.parse(result.metadata.body);
     expect(parsedBody).toEqual({
@@ -48,26 +46,21 @@ describe('signStep', () => {
   });
 
   it('maps SOLANA network correctly', async () => {
-    const result = await signStep(signing, { ...baseStep, network: 'SOLANA' }, {});
+    const result = await signStep(signing, { ...baseStep, network: 'SOLANA' });
     const parsedBody = JSON.parse(result.metadata.body);
     expect(parsedBody.parameters.type).toBe('TRANSACTION_TYPE_SOLANA');
   });
 
   it('returns signature as base64(JSON({body, stamp}))', async () => {
-    const result = await signStep(signing, baseStep, {});
+    const result = await signStep(signing, baseStep);
     const decoded = Buffer.from(result.signature, 'base64').toString('utf-8');
     const parsed = JSON.parse(decoded);
     expect(parsed.body).toBe(result.metadata.body);
     expect(parsed.stamp).toBe('fake-stamp-value');
   });
 
-  it('echoes unsignedTransaction in the result', async () => {
-    const result = await signStep(signing, baseStep, {});
-    expect(result.unsignedTransaction).toBe('0x02deadbeef');
-  });
-
   it('passes correct keys to stamp()', async () => {
-    await signStep(signing, baseStep, {});
+    await signStep(signing, baseStep);
     expect(stampModule.stamp).toHaveBeenCalledWith(
       { publicKey: signing.publicKey, privateKey: signing.privateKey },
       expect.any(String),
@@ -75,14 +68,15 @@ describe('signStep', () => {
   });
 
   it('returns metadata with X-Stamp header info', async () => {
-    const result = await signStep(signing, baseStep, {});
+    const result = await signStep(signing, baseStep);
     expect(result.metadata.stampHeaderName).toBe('X-Stamp');
     expect(result.metadata.stampHeaderValue).toBe('fake-stamp-value');
   });
 
   it('throws TesserConfigError for unsupported network', async () => {
-    await expect(signStep(signing, { ...baseStep, network: 'NOPE' }, {})).rejects.toBeInstanceOf(
-      TesserConfigError,
-    );
+    await expect(
+      // biome-ignore lint/suspicious/noExplicitAny: bypassing the SupportedNetwork union to exercise the runtime defensive path
+      signStep(signing, { ...baseStep, network: 'NOPE' as any }),
+    ).rejects.toBeInstanceOf(TesserConfigError);
   });
 });

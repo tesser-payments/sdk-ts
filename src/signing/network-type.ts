@@ -6,17 +6,19 @@
 
 import { TesserConfigError } from '../internal/errors.js';
 
-const NETWORK_TO_TURNKEY_TYPE: Readonly<Record<string, string>> = Object.freeze({
+const NETWORK_TO_TURNKEY_TYPE = {
   BASE: 'TRANSACTION_TYPE_ETHEREUM',
   BASE_SEPOLIA: 'TRANSACTION_TYPE_ETHEREUM',
   ETHEREUM: 'TRANSACTION_TYPE_ETHEREUM',
   POLYGON: 'TRANSACTION_TYPE_ETHEREUM',
   POLYGON_AMOY: 'TRANSACTION_TYPE_ETHEREUM',
   SOLANA: 'TRANSACTION_TYPE_SOLANA',
-});
+} as const;
+
+export type SupportedNetwork = keyof typeof NETWORK_TO_TURNKEY_TYPE;
 
 export function networkToTurnkeyType(network: string): string {
-  const turnkeyType = NETWORK_TO_TURNKEY_TYPE[network];
+  const turnkeyType = (NETWORK_TO_TURNKEY_TYPE as Readonly<Record<string, string>>)[network];
   if (turnkeyType === undefined) {
     const supported = Object.keys(NETWORK_TO_TURNKEY_TYPE).sort().join(', ');
     throw new TesserConfigError(`Unsupported network: '${network}'. Supported: ${supported}`);

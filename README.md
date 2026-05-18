@@ -50,20 +50,22 @@ const res = await fetch(`${API_BASE_URL}/v1/accounts/wallets`, {
 `signature` is `base64(JSON.stringify({ body, stamp }))` — drop it into the
 Tesser API request body as the documented `signature` field.
 
+**Private-key handling.** `signer.signing` exposes only `{ publicKey, enclaveId }`.
+The private key lives on the instance as an ECMA private field and is not
+reachable via property access, `console.log`, or `JSON.stringify`. The SDK still
+uses it internally to stamp activities — you just can't pull it back out.
+
 ## `signStep`
 
 `signStep` stamps a Turnkey `ACTIVITY_TYPE_SIGN_TRANSACTION_V2` body for a
-single rebalance step. Pass the step UUID, the unsigned transaction Tesser
-returned, the on-chain `signWith` address, and the network:
+single rebalance step. Pass the unsigned transaction Tesser returned, the
+on-chain `signWith` address, and the network — that's all the SDK needs to
+produce a signature:
 
 ```typescript
 import { LocalSigner, type StepForSigning } from '@tesser-payments/sdk';
 
 const step: StepForSigning = {
-  id: 'step_abc',                      // step UUID
-  transferId: 'rebalance_xyz',         // parent rebalance UUID
-                                       //   (webhook payloads: data.object.rebalance_id;
-                                       //    GET-rebalance:    step.transfer_id)
   unsignedTransaction: '0x02...',      // hex-encoded raw tx Tesser returned
   signWith: '0xabc...',                // account.crypto_wallet_address from
                                        //   GET /v1/accounts/{from_account_id}
@@ -73,9 +75,11 @@ const step: StepForSigning = {
 
 const signed = await signer.signStep(step);
 
-// POST /v1/treasury/rebalances/{transferId}/steps/{id}/sign
+// POST /v1/treasury/rebalances/{rebalanceId}/steps/{stepId}/sign
+// The IDs are yours to track — you got them from the API response or webhook;
+// the SDK has no use for them, so they're not in `StepForSigning`.
 await fetch(
-  `${API_BASE_URL}/v1/treasury/rebalances/${step.transferId}/steps/${step.id}/sign`,
+  `${API_BASE_URL}/v1/treasury/rebalances/${rebalanceId}/steps/${stepId}/sign`,
   {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -84,55 +88,52 @@ await fetch(
 );
 ```
 
-`signStep` returns `{ signature, unsignedTransaction, metadata }`. The
-`unsignedTransaction` is an echo of the input — handy for caller-side
-logging.
+`signStep` returns `{ signature, metadata }`. The `signature` field is what
+the Tesser API needs; `metadata` carries the underlying Turnkey activity body
+and stamp header value for debugging.
+
+The `network` field is typed as `SupportedNetwork`, derived from the SDK's
+network-to-Turnkey-type table — so a typo like `'BASE-SEPOLIA'` (hyphen) is a
+compile-time error. If you're pulling the value out of a webhook payload or
+env var, cast it at that boundary.
 
 ## Error handling
 
 The SDK mirrors Tesser's documented error envelope
 (<https://docs.tesser.xyz/overviews/errors>) rather than inventing a custom
-HTTP-status taxonomy. The full hierarchy is exported so consumers can branch
-on `instanceof`:
+HTTP-status taxonomy. v0.0.1 only signs locally, so only the signing-side
+errors are exported:
 
 ```
 TesserError                       (base; .cause set on all)
 ├── TesserConfigError             bad input at construction or call site
-├── TesserAPIError                non-2xx HTTP from Tesser
-│                                 .status, .headers, .requestId,
-│                                 .errors[]: TesserErrorDetail
-├── TesserConnectionError         network / transport failure
-├── TesserTimeoutError            request exceeded timeout
 └── TesserSigningError            local signing failure
     └── StampError                Turnkey ApiKeyStamper failed
 ```
 
-v0.0.1 only throws `TesserConfigError`, `TesserSigningError`, and
-`StampError` directly — the rest are exported now so consumer code that
-catches `TesserAPIError` (from its own HTTP layer) stays compatible when a
-future version adds an optional bundled client.
+All three carry the original failure as `.cause` and can be discriminated via
+`instanceof` or the static `.is()` guard:
 
 ```typescript
-import { TesserAPIError } from '@tesser-payments/sdk';
+import { TesserError, StampError } from '@tesser-payments/sdk';
 
 try {
-  // ... your fetch call ...
+  await signer.signStep(step);
 } catch (err) {
-  if (TesserAPIError.is(err)) {
-    if (err.hasCode('accounts-3005')) {
-      // Turnkey stamp rejected — re-register the API key.
-    }
-    console.error('Tesser API failure', {
-      status: err.status,
-      requestId: err.requestId,
-      errors: err.errors,
-    });
+  if (StampError.is(err)) {
+    // Turnkey rejected the stamp — usually a key-format problem.
+  }
+  if (TesserError.is(err)) {
+    console.error('Signing failed', { name: err.name, cause: err.cause });
   }
   throw err;
 }
 ```
 
-`err.errorCode` is a convenience for `err.errors[0]?.errorCode`.
+HTTP-side errors (`TesserAPIError`, `TesserConnectionError`,
+`TesserTimeoutError`) will return when the optional bundled client lands in a
+future version. Until then, model HTTP failures with whatever your `fetch`
+wrapper produces.
 
 ## Setup notes
 
@@ -157,7 +158,7 @@ correct — re-register the key in compressed form to fix.
 
 | Path | What it demonstrates |
 |---|---|
-| [`examples/create-wallet.ts`](./examples/create-wallet.ts) | OAuth → `signCreateWallet` → `POST /v1/accounts/wallets`. Doubles as the manual verification harness. |
+| [`examples/create-wallet.ts`](./examples/create-wallet.ts) | OAuth → `signCreateWallet({ type: 'stablecoin_ethereum' })` → `POST /v1/accounts/wallets` with `is_managed: true`. Solana and Stellar paths are not exercised in v0.0.1. |
 | [`examples/sign-step-polling.ts`](./examples/sign-step-polling.ts) | End-to-end rebalance signing driven by `GET /v1/treasury/rebalances/{id}` polling. |
 | [`examples/sign-step-webhooks.ts`](./examples/sign-step-webhooks.ts) | End-to-end rebalance signing driven by Tesser `step.*` webhooks. Best-effort: webhook signature verification is **not** wired up (the algorithm isn't currently documented), so do not run this against production. |
 | [`examples/lib/oauth.ts`](./examples/lib/oauth.ts) | Shared `client_credentials` token helper for the three scripts above. |
@@ -174,7 +175,10 @@ copy [`.env.example`](./.env.example) and fill in the values first.
   is purely additive and will not break v0.0.1 call sites.
 - **Webhook signature verification** — the header name and HMAC algorithm
   aren't currently documented in public Tesser docs.
-- **Browser, edge, and React Native runtimes** — Node ≥ 18 / Bun ≥ 1.1 only.
+- **Solana / Stellar `signCreateWallet`** — exported as `@experimental` types;
+  not verified end-to-end. Stellar is supported by Tesser only as a receive
+  (unmanaged) wallet.
+- **Browser, edge, and React Native runtimes** — Node ≥ 20 / Bun ≥ 1.3 only.
 
 ## Development
 

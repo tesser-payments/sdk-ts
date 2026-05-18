@@ -1,5 +1,7 @@
 // src/internal/types.ts
 
+import type { SupportedNetwork } from '../signing/network-type.js';
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'off';
 
 export interface Logger {
@@ -15,7 +17,12 @@ export interface SigningConfig {
   enclaveId: string;
 }
 
-export type WalletType = 'stablecoin_ethereum' | 'stablecoin_solana' | 'stablecoin_stellar';
+export type WalletType =
+  | 'stablecoin_ethereum'
+  /** @experimental Solana wallet creation is not yet verified end-to-end against Tesser staging. */
+  | 'stablecoin_solana'
+  /** @experimental Stellar is supported by Tesser only as a receive (unmanaged) wallet; `signCreateWallet` is unverified. */
+  | 'stablecoin_stellar';
 
 export interface SignedResultMetadata {
   stampHeaderName: string;
@@ -34,20 +41,12 @@ export interface CreateWalletParams {
 }
 
 export interface StepForSigning {
-  /** Step UUID */
-  id: string;
-  /**
-   * Parent rebalance UUID. Webhook step DTOs expose this as `rebalance_id`;
-   * GET-rebalance responses expose it as `transfer_id`. Same value; example
-   * code maps from whichever field is present in its source.
-   */
-  transferId: string;
   /** Hex-encoded raw tx bytes, e.g. "0x02..." */
   unsignedTransaction: string;
   /** On-chain address from GET /v1/accounts/{id} → crypto_wallet_address */
   signWith: string;
-  /** Network identifier: BASE | BASE_SEPOLIA | ETHEREUM | POLYGON | POLYGON_AMOY | SOLANA */
-  network: string;
+  /** Network identifier; one of the supported chains in `NETWORK_TO_TURNKEY_TYPE`. */
+  network: SupportedNetwork;
 }
 
 export interface SignedStepResultMetadata {
@@ -59,18 +58,8 @@ export interface SignedStepResultMetadata {
 export interface SignedStepResult {
   /** base64(JSON.stringify({body, stamp})) — pass to Tesser API */
   signature: string;
-  /** Echo of input — useful for caller logging */
-  unsignedTransaction: string;
   metadata: SignedStepResultMetadata;
 }
-
-/**
- * Per-call options for `signStep`. Empty in v0.0.1; reserved for future
- * options such as `signal?: AbortSignal`, `timeout?: number`,
- * `maxRetries?: number`. Defined as a `Record<string, never>` so the
- * empty-object type doesn't trip Biome's `noBannedTypes` rule.
- */
-export type SignStepOptions = Record<string, never>;
 
 export interface LocalSignerOptions {
   signing: SigningConfig;

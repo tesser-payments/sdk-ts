@@ -3,12 +3,16 @@
 // Run: bun run examples/create-wallet.ts
 // Loads .env.local. Required env vars listed in .env.example.
 //
+// This example creates a managed Ethereum wallet. Solana and Stellar create-wallet
+// paths are not exercised here — Stellar is supported by Tesser only as a receive
+// (unmanaged) wallet, and the Solana managed path is unverified end-to-end.
+//
 // Sequence:
 //   1. Load env + OAuth client_credentials token
-//   2. LocalSigner({ signing }).signCreateWallet({ name, type })
-//   3. POST /v1/accounts/wallets with the signature
+//   2. LocalSigner({ signing }).signCreateWallet({ name, type: 'stablecoin_ethereum' })
+//   3. POST /v1/accounts/wallets with the signature (is_managed: true)
 //   4. Log response or fail loudly
-import { LocalSigner, type WalletType } from '../src/index.js';
+import { LocalSigner } from '../src/index.js';
 import { getAccessToken } from './lib/oauth.js';
 import { requireEnv } from './lib/require-env.js';
 
@@ -20,10 +24,8 @@ const env = requireEnv([
   'SIGNING_PUBLIC_KEY',
   'SIGNING_PRIVATE_KEY',
   'SIGNING_ENCLAVE_ID',
-  'CREATE_WALLET_TYPE',
 ] as const);
 
-const walletType = env.CREATE_WALLET_TYPE as WalletType;
 const walletName = `example-${Date.now()}`;
 
 const token = await getAccessToken(env.API_BASE_URL, env.API_CLIENT_ID, env.API_CLIENT_SECRET);
@@ -36,7 +38,10 @@ const signer = new LocalSigner({
   },
 });
 
-const { signature } = await signer.signCreateWallet({ name: walletName, type: walletType });
+const { signature } = await signer.signCreateWallet({
+  name: walletName,
+  type: 'stablecoin_ethereum',
+});
 
 const response = await fetch(`${env.API_BASE_URL}/v1/accounts/wallets`, {
   method: 'POST',
@@ -48,7 +53,7 @@ const response = await fetch(`${env.API_BASE_URL}/v1/accounts/wallets`, {
   body: JSON.stringify({
     signature,
     name: walletName,
-    type: walletType,
+    type: 'stablecoin_ethereum',
     is_managed: true,
   }),
 });

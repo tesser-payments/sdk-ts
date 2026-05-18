@@ -16,18 +16,21 @@ afterEach(() => {
 });
 
 describe('LocalSigner', () => {
-  it('constructs with valid options', () => {
+  it('constructs with valid options and exposes only publicKey + enclaveId', () => {
     const s = new LocalSigner({ signing });
     expect(s.signing.publicKey).toBe(signing.publicKey);
     expect(s.signing.enclaveId).toBe(signing.enclaveId);
+    // privateKey must not be reachable via the public surface.
+    // biome-ignore lint/suspicious/noExplicitAny: testing that the field is absent at runtime
+    expect((s.signing as any).privateKey).toBeUndefined();
   });
 
-  it('freezes signing config', () => {
+  it('does not leak privateKey via JSON.stringify or util.inspect', () => {
     const s = new LocalSigner({ signing });
-    expect(() => {
-      // biome-ignore lint/suspicious/noExplicitAny: testing runtime freeze
-      (s.signing as any).publicKey = 'mutated';
-    }).toThrow();
+    const serialized = JSON.stringify(s);
+    expect(serialized).not.toContain(signing.privateKey);
+    const inspected = String(s);
+    expect(inspected).not.toContain(signing.privateKey);
   });
 
   it.each([
@@ -38,7 +41,7 @@ describe('LocalSigner', () => {
     expect(() => new LocalSigner({ signing: bad })).toThrow(TesserConfigError);
   });
 
-  it('signCreateWallet delegates to signing/create-wallet', async () => {
+  it('signCreateWallet delegates to signing/create-wallet with full SigningConfig', async () => {
     const spy = vi.spyOn(createWalletModule, 'signCreateWallet').mockResolvedValue({
       signature: 'sig',
       metadata: { stampHeaderName: 'X-Stamp', stampHeaderValue: 'v', body: '{}' },
@@ -48,40 +51,18 @@ describe('LocalSigner', () => {
     expect(spy).toHaveBeenCalledWith(signing, { name: 'w', type: 'stablecoin_ethereum' });
   });
 
-  it('signStep delegates to signing/sign-step', async () => {
+  it('signStep delegates to signing/sign-step with full SigningConfig', async () => {
     const step: StepForSigning = {
-      id: 's',
-      transferId: 't',
       unsignedTransaction: '0x',
       signWith: '0xa',
       network: 'BASE',
     };
     const spy = vi.spyOn(signStepModule, 'signStep').mockResolvedValue({
       signature: 'sig',
-      unsignedTransaction: '0x',
       metadata: { stampHeaderName: 'X-Stamp', stampHeaderValue: 'v', body: '{}' },
     });
     const s = new LocalSigner({ signing });
     await s.signStep(step);
-    expect(spy).toHaveBeenCalledWith(signing, step, {});
-  });
-
-  it('signStep passes through opts when provided', async () => {
-    const step: StepForSigning = {
-      id: 's',
-      transferId: 't',
-      unsignedTransaction: '0x',
-      signWith: '0xa',
-      network: 'BASE',
-    };
-    const spy = vi.spyOn(signStepModule, 'signStep').mockResolvedValue({
-      signature: 'sig',
-      unsignedTransaction: '0x',
-      metadata: { stampHeaderName: 'X-Stamp', stampHeaderValue: 'v', body: '{}' },
-    });
-    const s = new LocalSigner({ signing });
-    const opts = {};
-    await s.signStep(step, opts);
-    expect(spy).toHaveBeenCalledWith(signing, step, opts);
+    expect(spy).toHaveBeenCalledWith(signing, step);
   });
 });

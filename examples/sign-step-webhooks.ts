@@ -8,7 +8,7 @@
 // `step.*` events. The example filters by data.object.status + data.object.id
 // so concurrent rebalances don't cross-trigger.
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
-import { LocalSigner, type StepForSigning } from '../src/index.js';
+import { LocalSigner, type StepForSigning, type SupportedNetwork } from '../src/index.js';
 import { getAccessToken } from './lib/oauth.js';
 import { optionalEnv, requireEnv } from './lib/require-env.js';
 
@@ -26,7 +26,8 @@ const env = requireEnv([
 
 const FROM_AMOUNT = optionalEnv('FROM_AMOUNT', '0.000001');
 const FROM_CURRENCY = optionalEnv('FROM_CURRENCY', 'USDC');
-const FROM_NETWORK = optionalEnv('FROM_NETWORK', 'BASE_SEPOLIA');
+// Cast at the env boundary — callers control which network they target via env config.
+const FROM_NETWORK = optionalEnv('FROM_NETWORK', 'BASE_SEPOLIA') as SupportedNetwork;
 const TO_CURRENCY = optionalEnv('TO_CURRENCY', 'USDC');
 const TO_NETWORK = optionalEnv('TO_NETWORK', 'BASE_SEPOLIA');
 const WEBHOOK_PORT = optionalEnv('WEBHOOK_PORT', '8787');
@@ -74,6 +75,10 @@ class WebhookListener {
   }
 }
 
+// Generous bound — Tesser step webhooks are kilobytes at most. Caps memory
+// use if a misbehaving sender (bug or attacker) tries to push a giant body.
+const MAX_BODY_BYTES = 1_048_576; // 1 MB
+
 const listener = new WebhookListener();
 const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   if (req.method !== 'POST') {
@@ -86,8 +91,22 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   //   the public Tesser docs; until verification lands, this handler accepts
   //   every incoming POST. Do NOT run against production.
   const chunks: Buffer[] = [];
-  req.on('data', (c: Buffer) => chunks.push(c));
+  let received = 0;
+  let rejected = false;
+  req.on('data', (c: Buffer) => {
+    if (rejected) return;
+    received += c.length;
+    if (received > MAX_BODY_BYTES) {
+      rejected = true;
+      res.statusCode = 413;
+      res.end();
+      req.destroy();
+      return;
+    }
+    chunks.push(c);
+  });
   req.on('end', () => {
+    if (rejected) return;
     try {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
       listener.push(body);
@@ -169,13 +188,7 @@ try {
     },
   });
 
-  // Webhook step DTO uses `rebalance_id` for the parent UUID;
-  // GET-rebalance uses `transfer_id`. Both name the same value.
-  const transferId: string = stepObj.rebalance_id ?? stepObj.transfer_id ?? rebalanceId;
-
   const stepForSigning: StepForSigning = {
-    id: stepId,
-    transferId,
     unsignedTransaction: stepObj.unsigned_transaction,
     signWith,
     network: FROM_NETWORK,

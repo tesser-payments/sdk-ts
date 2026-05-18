@@ -13,7 +13,7 @@
 //   6. POST /v1/treasury/rebalances/{id}/steps/{stepId}/sign
 //   7. Poll until step.status == 'completed' (or fail if any failed_at)
 //   8. Print final summary
-import { LocalSigner, type StepForSigning } from '../src/index.js';
+import { LocalSigner, type StepForSigning, type SupportedNetwork } from '../src/index.js';
 import { getAccessToken } from './lib/oauth.js';
 import { optionalEnv, requireEnv } from './lib/require-env.js';
 
@@ -31,7 +31,8 @@ const env = requireEnv([
 
 const FROM_AMOUNT = optionalEnv('FROM_AMOUNT', '0.000001');
 const FROM_CURRENCY = optionalEnv('FROM_CURRENCY', 'USDC');
-const FROM_NETWORK = optionalEnv('FROM_NETWORK', 'BASE_SEPOLIA');
+// Cast at the env boundary — callers control which network they target via env config.
+const FROM_NETWORK = optionalEnv('FROM_NETWORK', 'BASE_SEPOLIA') as SupportedNetwork;
 const TO_CURRENCY = optionalEnv('TO_CURRENCY', 'USDC');
 const TO_NETWORK = optionalEnv('TO_NETWORK', 'BASE_SEPOLIA');
 
@@ -135,8 +136,6 @@ const signer = new LocalSigner({
 });
 
 const stepForSigning: StepForSigning = {
-  id: pendingStep.id,
-  transferId: rebalanceId,
   unsignedTransaction: pendingStep.unsigned_transaction,
   signWith,
   network: FROM_NETWORK,

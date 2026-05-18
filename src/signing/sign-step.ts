@@ -2,19 +2,13 @@
 //
 // Builds Turnkey ACTIVITY_TYPE_SIGN_TRANSACTION_V2 payload and stamps it.
 
-import type {
-  SignStepOptions,
-  SignedStepResult,
-  SigningConfig,
-  StepForSigning,
-} from '../internal/types.js';
+import type { SignedStepResult, SigningConfig, StepForSigning } from '../internal/types.js';
 import { networkToTurnkeyType } from './network-type.js';
 import { stamp } from './stamp.js';
 
 export async function signStep(
   signing: SigningConfig,
   step: StepForSigning,
-  _opts: SignStepOptions = {},
 ): Promise<SignedStepResult> {
   const turnkeyType = networkToTurnkeyType(step.network);
 
@@ -39,7 +33,6 @@ export async function signStep(
 
   return {
     signature,
-    unsignedTransaction: step.unsignedTransaction,
     metadata: {
       stampHeaderName: stamped.stampHeaderName,
       stampHeaderValue: stamped.stampHeaderValue,
