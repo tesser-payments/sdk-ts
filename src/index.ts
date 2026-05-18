@@ -1,4 +1,4 @@
-// src/index.ts — public API surface for @tesser-payments/sdk
+// src/index.ts — public API surface for @tesser-payments/sdk-ts
 export { LocalSigner } from './signer.js';
 export type { PublicSigningInfo } from './signer.js';
 

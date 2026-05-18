@@ -1,4 +1,4 @@
-# @tesser-payments/sdk
+# @tesser-payments/sdk-ts
 
 Signer-only TypeScript SDK for Tesser API: locally stamp `signCreateWallet` and
 `signStep` activities using Turnkey API keys. The SDK does not own HTTP or
@@ -8,7 +8,7 @@ it. Bring your own client.
 ## Install
 
 ```sh
-bun add @tesser-payments/sdk @turnkey/api-key-stamper @tesser-payments/types
+bun add @tesser-payments/sdk-ts @turnkey/api-key-stamper @tesser-payments/types
 ```
 
 Both `@turnkey/api-key-stamper` and `@tesser-payments/types` are peer
@@ -17,7 +17,7 @@ dependencies (no runtime dependencies of our own). Apache 2.0 licensed.
 ## Quick start
 
 ```typescript
-import { LocalSigner } from '@tesser-payments/sdk';
+import { LocalSigner } from '@tesser-payments/sdk-ts';
 
 const signer = new LocalSigner({
   signing: {
@@ -63,7 +63,7 @@ on-chain `signWith` address, and the network — that's all the SDK needs to
 produce a signature:
 
 ```typescript
-import { LocalSigner, type StepForSigning } from '@tesser-payments/sdk';
+import { LocalSigner, type StepForSigning } from '@tesser-payments/sdk-ts';
 
 const step: StepForSigning = {
   unsignedTransaction: '0x02...',      // hex-encoded raw tx Tesser returned
@@ -115,7 +115,7 @@ All three carry the original failure as `.cause` and can be discriminated via
 `instanceof` or the static `.is()` guard:
 
 ```typescript
-import { TesserError, StampError } from '@tesser-payments/sdk';
+import { TesserError, StampError } from '@tesser-payments/sdk-ts';
 
 try {
   await signer.signStep(step);
@@ -192,9 +192,10 @@ bun run test:watch
 bun run build         # bun build (JS) + tsc --emitDeclarationOnly (.d.ts)
 ```
 
-Conventional commits. Changesets manage versions and the changelog
-(`.changeset/`); see [`CHANGELOG.md`](./CHANGELOG.md). Release via
-`bun run release`.
+Conventional commits. Versions are bumped manually in `package.json`;
+`CHANGELOG.md` is hand-authored per release. Cutting a release: bump
+the version, merge to `main`, then trigger the `Release` workflow from
+the Actions tab (see `.github/workflows/release.yml`).
 
 CI runs typecheck, lint, test, build on every PR (see
 `.github/workflows/ci.yml`).
