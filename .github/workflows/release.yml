@@ -83,7 +83,9 @@ jobs:
       - name: Upgrade npm for Trusted Publishing
         # Trusted Publishing (OIDC-based auth, no long-lived token) requires
         # npm >= 11.5.1. Node 20 ships with npm 10, so upgrade explicitly.
-        run: npm install -g npm@latest
+        # Pinned to the v11.x line — avoids being broken by a future npm
+        # major bump while still picking up patch/minor fixes.
+        run: npm install -g 'npm@^11.5.1'
 
       - run: bun install --frozen-lockfile
 
