@@ -68,8 +68,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
-          # Don't leave github.token in .git/config across bun install / npm
-          # audit / npm publish — a malicious install-time script could
+          # Don't leave github.token in .git/config across bun install /
+          # bun audit / npm publish — a malicious install-time script could
           # otherwise read it and use the repo's write scope. The tag-push
           # step below supplies auth on-demand via http.extraheader.
           persist-credentials: false
@@ -77,13 +77,14 @@ jobs:
         with:
           # Must be >= 1.2 — earlier Bun does not recognize the lockfile's
           # `configVersion` field and reports spurious drift on `--frozen-lockfile`.
+          # `bun audit` (used below) also requires Bun 1.2+.
           bun-version: '1.3'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          # Pinned to satisfy npm 11.5.1's engine requirement
-          # (`^20.17.0 || >=22.9.0`) — see the Trusted Publishing upgrade
-          # step below. Analog to Kotlin's pinned Java 17 LTS for
-          # reproducibility.
+          # Node is here solely to run `npm publish --provenance` with Trusted
+          # Publishing — `bun publish` does not yet support npm's OIDC trusted
+          # publisher flow. Pinned to satisfy npm 11.5.1's engine requirement
+          # (`^20.17.0 || >=22.9.0`); see the upgrade step below.
           node-version: '20.17.0'
           registry-url: 'https://registry.npmjs.org'
 
@@ -96,15 +97,12 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Audit registry signatures and known CVEs
-        # `npm audit signatures` verifies that every installed package's
-        # registry signature matches npm's published key — catches packages
-        # tampered with in transit or via a compromised registry mirror.
-        # `npm audit --audit-level=high` fails the build on known
-        # high/critical CVEs in the shipped tree.
-        run: |
-          npm audit signatures
-          npm audit --audit-level=high --omit=dev
+      - name: Audit known CVEs
+        # `bun audit` reads the bun.lock-resolved tree and fails on advisories
+        # at or above the given level. Bun doesn't currently offer a registry
+        # signature verifier analog to `npm audit signatures`, so signature
+        # checking is intentionally out of scope here.
+        run: bun audit --audit-level=high
 
       - name: Verify build
         run: |
