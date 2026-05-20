@@ -1,6 +1,6 @@
 {
   "name": "@tesser-payments/sdk-ts",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Signer-only TypeScript SDK for Tesser API: locally stamp signCreateWallet and signStep activities. No HTTP, no OAuth — bring your own client.",
   "type": "module",
   "exports": {
@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "bun run build:js && bun run build:types",
-    "build:js": "bun build ./src/index.ts --target=node --format=esm --outdir=./dist --external @turnkey/api-key-stamper --external @tesser-payments/types",
+    "build:js": "bun build ./src/index.ts --target=node --format=esm --outdir=./dist --external @tesser-payments/types",
     "build:types": "tsc -p tsconfig.build.json",
     "prepack": "bun run build",
     "test": "vitest run",
@@ -26,15 +26,17 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@tesser-payments/types": "*",
-    "@turnkey/api-key-stamper": "*"
+    "@tesser-payments/types": "*"
+  },
+  "dependencies": {
+    "@turnkey/api-key-stamper": "^0.6.5"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9",
     "@tesser-payments/types": "*",
-    "@turnkey/api-key-stamper": "*",
     "@types/node": "^20",
     "typescript": "^5.4",
     "vitest": "^2"
-  }
+  },
+  "trustedDependencies": []
 }
