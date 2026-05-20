@@ -1,0 +1,118 @@
+name: Release
+
+# Two trigger paths (mirrors sdk-kotlin/.github/workflows/release.yml):
+#   1. push to main — the real release. The `gate` job reads `version`
+#      from `package.json` and skips the rest of the workflow if a
+#      `v<version>` tag already exists. To cut a new release, bump
+#      `version` in package.json and push to main; the workflow
+#      publishes to npm and creates the tag.
+#   2. workflow_dispatch — manual trigger from the Actions tab on any
+#      branch, ALWAYS a dry run: `npm publish --dry-run`, no tag, no
+#      GitHub release. There's no opt-out so dispatch can never produce
+#      an untagged public release. Real releases must go through
+#      push-to-main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# `contents: write` is needed so the publish job can push the version tag
+# and create a GitHub release.
+# `id-token: write` lets `npm publish --provenance` attach a build-chain
+# attestation — npm's analog to Kotlin's GPG-signed Maven artifacts.
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      should_release: ${{ steps.check.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0   # full history so `git rev-parse` can see existing tags
+      - id: read
+        name: Read package version from package.json
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "::error::Could not read 'version' from package.json" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version: $VERSION"
+      - id: check
+        name: Skip if this version is already released
+        run: |
+          # Manual dispatch always proceeds — caller wants to test the workflow
+          # itself. Only the push-to-main path enforces the tag-existence gate.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch (dry run): proceeding."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          elif git rev-parse "v${{ steps.read.outputs.version }}" >/dev/null 2>&1; then
+            echo "Tag v${{ steps.read.outputs.version }} already exists. No release needed."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag v${{ steps.read.outputs.version }} does not exist. Releasing."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    needs: gate
+    if: needs.gate.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Must be >= 1.2 — earlier Bun does not recognize the lockfile's
+          # `configVersion` field and reports spurious drift on `--frozen-lockfile`.
+          bun-version: '1.3'
+      - uses: actions/setup-node@v4
+        with:
+          # Matches `engines.node` floor in package.json — analog to Kotlin's
+          # pinned Java 17 LTS for reproducibility.
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: bun install --frozen-lockfile
+
+      - name: Verify build
+        run: |
+          bun run typecheck
+          bun run lint
+          bun run test
+          bun run build
+
+      - name: Publish (npm registry, or --dry-run for workflow_dispatch)
+        env:
+          # Configure NPM_TOKEN in GitHub > Settings > Secrets and variables > Actions.
+          # Same scope/token used by platform's publish-types.yml.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Dispatch is always a dry run; only push-to-main publishes for real.
+          # No opt-out — see the on-trigger comment at the top.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run: showing what would publish."
+            npm publish --dry-run --access public --provenance
+          else
+            npm publish --access public --provenance
+          fi
+
+      - name: Tag the release and create a GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "Tesser Engineering"
+          git config user.email "engineering@tesser.xyz"
+          TAG="v${{ needs.gate.outputs.version }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --generate-notes
