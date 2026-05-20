@@ -68,6 +68,11 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+          # Don't leave github.token in .git/config across bun install / npm
+          # audit / npm publish — a malicious install-time script could
+          # otherwise read it and use the repo's write scope. The tag-push
+          # step below supplies auth on-demand via http.extraheader.
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           # Must be >= 1.2 — earlier Bun does not recognize the lockfile's
@@ -135,5 +140,9 @@ jobs:
           git config user.email "engineering@tesser.xyz"
           TAG="v${{ needs.gate.outputs.version }}"
           git tag "$TAG"
-          git push origin "$TAG"
+          # Auth on-demand via http.extraheader since the checkout above
+          # ran with persist-credentials: false. `gh release create` uses
+          # GH_TOKEN from env directly, so no extra config needed there.
+          git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
+              push origin "$TAG"
           gh release create "$TAG" --generate-notes
