@@ -10,6 +10,14 @@
     }
   },
   "files": ["dist", "README.md", "LICENSE"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tesser-payments/sdk-ts.git"
+  },
+  "homepage": "https://github.com/tesser-payments/sdk-ts#readme",
+  "bugs": {
+    "url": "https://github.com/tesser-payments/sdk-ts/issues"
+  },
   "engines": {
     "node": ">=20",
     "bun": ">=1.3"
