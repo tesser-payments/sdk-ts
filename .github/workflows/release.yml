@@ -80,9 +80,11 @@ jobs:
           bun-version: '1.3'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          # Matches `engines.node` floor in package.json — analog to Kotlin's
-          # pinned Java 17 LTS for reproducibility.
-          node-version: '20'
+          # Pinned to satisfy npm 11.5.1's engine requirement
+          # (`^20.17.0 || >=22.9.0`) — see the Trusted Publishing upgrade
+          # step below. Analog to Kotlin's pinned Java 17 LTS for
+          # reproducibility.
+          node-version: '20.17.0'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Upgrade npm for Trusted Publishing
