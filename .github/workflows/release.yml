@@ -136,13 +136,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git config user.name "Tesser Engineering"
-          git config user.email "engineering@tesser.xyz"
           TAG="v${{ needs.gate.outputs.version }}"
-          git tag "$TAG"
-          # Auth on-demand via http.extraheader since the checkout above
-          # ran with persist-credentials: false. `gh release create` uses
-          # GH_TOKEN from env directly, so no extra config needed there.
-          git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
-              push origin "$TAG"
+          # Create the tag ref via the GitHub API rather than `git push`.
+          # The checkout above used `persist-credentials: false`, so git has
+          # no remote auth configured — and injecting it on-demand via
+          # http.extraheader is fragile. `gh api` uses GH_TOKEN directly,
+          # which is also the credential `gh release create` already relies
+          # on, so this keeps a single auth path for the whole step.
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${TAG}" \
+            -f sha="${GITHUB_SHA}"
           gh release create "$TAG" --generate-notes
