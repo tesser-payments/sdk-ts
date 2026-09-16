@@ -11,6 +11,8 @@ describe('networkToTurnkeyType', () => {
     ['POLYGON', 'TRANSACTION_TYPE_ETHEREUM'],
     ['POLYGON_AMOY', 'TRANSACTION_TYPE_ETHEREUM'],
     ['SOLANA', 'TRANSACTION_TYPE_SOLANA'],
+    ['TEMPO', 'TRANSACTION_TYPE_TEMPO'],
+    ['TEMPO_MODERATO', 'TRANSACTION_TYPE_TEMPO'],
   ])('maps %s -> %s', (network, expected) => {
     expect(networkToTurnkeyType(network)).toBe(expected);
   });
@@ -26,7 +28,7 @@ describe('networkToTurnkeyType', () => {
     } catch (e) {
       expect((e as Error).message).toContain("'NOT_A_NETWORK'");
       expect((e as Error).message).toContain(
-        'BASE, BASE_SEPOLIA, ETHEREUM, ETHEREUM_SEPOLIA, POLYGON, POLYGON_AMOY, SOLANA',
+        'BASE, BASE_SEPOLIA, ETHEREUM, ETHEREUM_SEPOLIA, POLYGON, POLYGON_AMOY, SOLANA, TEMPO, TEMPO_MODERATO',
       );
     }
   });

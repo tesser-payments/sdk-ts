@@ -71,9 +71,7 @@ const step: StepForSigning = {
   unsignedTransaction: '0x02...',      // hex-encoded raw tx Tesser returned
   signWith: '0xabc...',                // account.crypto_wallet_address from
                                        //   GET /v1/accounts/{from_account_id}
-  network: 'BASE_SEPOLIA',             // BASE | BASE_SEPOLIA | ETHEREUM |
-                                       //   ETHEREUM_SEPOLIA | POLYGON |
-                                       //   POLYGON_AMOY | SOLANA
+  network: 'BASE_SEPOLIA',
 };
 
 const signed = await signer.signStep(step);
@@ -99,6 +97,22 @@ The `network` field is typed as `SupportedNetwork`, derived from the SDK's
 network-to-Turnkey-type table — so a typo like `'BASE-SEPOLIA'` (hyphen) is a
 compile-time error. If you're pulling the value out of a webhook payload or
 env var, cast it at that boundary.
+
+Supported networks are `BASE`, `BASE_SEPOLIA`, `ETHEREUM`, `ETHEREUM_SEPOLIA`,
+`POLYGON`, `POLYGON_AMOY`, `SOLANA`, `TEMPO`, and `TEMPO_MODERATO`.
+
+### Tempo transfers
+
+1. Pass the backend-provided native Tempo transaction (`0x76...`), customer
+   wallet address, and `TEMPO` or `TEMPO_MODERATO` to `signStep`.
+2. The SDK stamps a Turnkey request with `TRANSACTION_TYPE_TEMPO`, preserving
+   the transaction bytes exactly. Submit the returned `signature` to the
+   existing Tesser signing endpoint.
+3. Tesser obtains the customer signature from Turnkey, adds its sponsor
+   signature, and broadcasts the sponsored transfer. Tesser manages the
+   sponsor key and network fee.
+
+Unknown networks raise `TesserConfigError` before the SDK creates a stamp.
 
 ## Error handling
 

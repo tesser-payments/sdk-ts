@@ -1,8 +1,6 @@
 // src/signing/network-type.ts
 //
 // Maps Tesser network identifiers to Turnkey's TRANSACTION_TYPE_* enum.
-// EVM-family networks all map to TRANSACTION_TYPE_ETHEREUM because Turnkey
-// keys on signing scheme, not chain ID.
 
 import { TesserConfigError } from '../internal/errors.js';
 
@@ -14,6 +12,8 @@ const NETWORK_TO_TURNKEY_TYPE = {
   POLYGON: 'TRANSACTION_TYPE_ETHEREUM',
   POLYGON_AMOY: 'TRANSACTION_TYPE_ETHEREUM',
   SOLANA: 'TRANSACTION_TYPE_SOLANA',
+  TEMPO: 'TRANSACTION_TYPE_TEMPO',
+  TEMPO_MODERATO: 'TRANSACTION_TYPE_TEMPO',
 } as const;
 
 export type SupportedNetwork = keyof typeof NETWORK_TO_TURNKEY_TYPE;

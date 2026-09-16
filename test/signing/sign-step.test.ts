@@ -29,6 +29,40 @@ afterEach(() => {
 });
 
 describe('signStep', () => {
+  it.each(['TEMPO', 'TEMPO_MODERATO'] as const)(
+    'stamps the approved native transaction on %s',
+    async (network) => {
+      const step: StepForSigning = {
+        ...baseStep,
+        network,
+        unsignedTransaction: '0x76deadbeef',
+      };
+      const result = await signStep(signing, step);
+      const envelope = JSON.parse(Buffer.from(result.signature, 'base64').toString('utf-8'));
+      const body = JSON.parse(envelope.body);
+      expect(body).toEqual({
+        type: 'ACTIVITY_TYPE_SIGN_TRANSACTION_V2',
+        timestampMs: '1700000000000',
+        organizationId: signing.enclaveId,
+        parameters: {
+          type: 'TRANSACTION_TYPE_TEMPO',
+          signWith: step.signWith,
+          unsignedTransaction: step.unsignedTransaction,
+        },
+      });
+      expect(envelope.stamp).toBe('fake-stamp-value');
+      expect(envelope).toEqual({
+        body: result.metadata.body,
+        stamp: result.metadata.stampHeaderValue,
+      });
+      expect(stampModule.stamp).toHaveBeenCalledOnce();
+      expect(stampModule.stamp).toHaveBeenCalledWith(
+        { publicKey: signing.publicKey, privateKey: signing.privateKey },
+        envelope.body,
+      );
+    },
+  );
+
   it('builds ACTIVITY_TYPE_SIGN_TRANSACTION_V2 body with correct fields', async () => {
     const result = await signStep(signing, baseStep);
 
@@ -78,5 +112,6 @@ describe('signStep', () => {
       // biome-ignore lint/suspicious/noExplicitAny: bypassing the SupportedNetwork union to exercise the runtime defensive path
       signStep(signing, { ...baseStep, network: 'NOPE' as any }),
     ).rejects.toBeInstanceOf(TesserConfigError);
+    expect(stampModule.stamp).not.toHaveBeenCalled();
   });
 });
