@@ -24,7 +24,6 @@ const signer = new LocalSigner({
     privateKey: process.env.SIGNING_PRIVATE_KEY!,
     enclaveId: process.env.SIGNING_ENCLAVE_ID!,
   },
-  apiBaseUrl: 'https://api.tesser.xyz', // sandbox: https://api-sandbox.tesser.xyz
 });
 
 const { signature } = await signer.signCreateWallet({
@@ -50,14 +49,21 @@ const res = await fetch(`${API_BASE_URL}/v1/accounts/wallets`, {
 `signature` is `base64(JSON.stringify({ body, stamp }))` — drop it into the
 Tesser API request body as the documented `signature` field.
 
-`LocalSigner` requires the Tesser API base URL (`https://api.tesser.xyz` or
-`https://api-sandbox.tesser.xyz`); a trailing `/` or `/v1` is removed. Pass an
+`apiBaseUrl` is optional; pass it to use only that URL (`https://api.tesser.xyz`
+or `https://api-sandbox.tesser.xyz`; a trailing `/` or `/v1` is removed). Pass an
 optional `fetch` implementation to configure a proxy.
 
 `signCreateWallet` signs a wallet-creation request. For `stablecoin_ethereum`,
 it first fetches the request to sign from the Tesser API and checks that it
 matches your parameters. The private key never leaves your process. Tesser
 currently supports managed wallets for `stablecoin_ethereum` only.
+
+`LocalSigner({ signing })` works with production and sandbox signing keys.
+Without `apiBaseUrl`, the first `stablecoin_ethereum` `signCreateWallet` tries
+production and, if production does not accept your signing key, sandbox, and
+remembers it for later calls. Set `apiBaseUrl` if your network allows only one
+Tesser host, or if you create a new signer per request (each new signer detects
+again). Send your own API requests to the environment of your signing key.
 
 **Private-key handling.** `signer.signing` exposes only `{ publicKey, enclaveId }`.
 The private key lives on the instance as an ECMA private field and is not
@@ -141,7 +147,8 @@ the request `signCreateWallet` makes to Tesser for `stablecoin_ethereum`.
 `errors[]` (with `errorCode` for the first one). `TesserConnectionError`,
 `TesserTimeoutError`, and a `TesserAPIError` with status 429 or 5xx are safe to
 retry; a `TesserAPIError` with any other 4xx status fails the same way on
-retry.
+retry. Without `apiBaseUrl`, if neither production nor sandbox accepts your
+signing key, the `TesserAPIError` from production is thrown.
 
 Each error carries the original failure as `.cause` and can be discriminated via
 `instanceof` or the static `.is()` guard:

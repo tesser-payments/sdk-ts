@@ -9,7 +9,7 @@
 //
 // Sequence:
 //   1. Load env + OAuth client_credentials token
-//   2. LocalSigner({ signing, apiBaseUrl }).signCreateWallet({ name, type: 'stablecoin_ethereum' })
+//   2. LocalSigner({ signing }).signCreateWallet({ name, type: 'stablecoin_ethereum' })
 //   3. POST /v1/accounts/wallets with the signature (is_managed: true)
 //   4. Log response or fail loudly
 import { LocalSigner } from '../src/index.js';
@@ -36,7 +36,6 @@ const signer = new LocalSigner({
     privateKey: env.SIGNING_PRIVATE_KEY,
     enclaveId: env.SIGNING_ENCLAVE_ID,
   },
-  apiBaseUrl: env.API_BASE_URL,
 });
 
 const { signature } = await signer.signCreateWallet({

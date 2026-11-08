@@ -25,15 +25,15 @@ export interface PublicSigningInfo {
  * Produces locally-signed activity payloads for Tesser API operations.
  *
  * Supports `signCreateWallet` and `signStep`. Construction validates that the
- * signing keys are non-blank and that `apiBaseUrl` is an https URL.
+ * signing keys are non-blank and that `apiBaseUrl`, if set, is an https URL.
  *
  * Key handling: the private key is stored in an ECMA private field (`#privateKey`)
  * and is not reachable via `signer.signing.privateKey` or any other public
  * surface. `signer.signing` exposes only `{ publicKey, enclaveId }`, so logging
  * `signer` or its `signing` property will not leak the private key.
  *
- * Thread-safety: stateless and reentrant. A single LocalSigner instance may
- * be shared across concurrent calls; the SDK never mutates internal state.
+ * Thread-safety: the only state is the environment remembered after the first
+ * Ethereum wallet request; a single LocalSigner may be shared across concurrent calls.
  */
 export class LocalSigner {
   readonly signing: PublicSigningInfo;
@@ -65,7 +65,8 @@ export class LocalSigner {
    *   Tesser does not match your parameters.
    * @throws {TesserAPIError} if Tesser answers with an error status or an
    *   invalid response. Safe to retry for status 429 or 5xx; other 4xx statuses
-   *   fail the same way on retry.
+   *   fail the same way on retry. Without `apiBaseUrl`, if neither production nor
+   *   sandbox accepts your signing key, the error from production is thrown.
    * @throws {TesserConnectionError} if the request to Tesser fails at the
    *   network level. Safe to retry.
    * @throws {TesserTimeoutError} if the request to Tesser times out. Safe to retry.

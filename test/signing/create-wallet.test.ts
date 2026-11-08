@@ -8,7 +8,11 @@ import type { TesserApiConnection } from '../../src/signing/unsigned-payload.js'
 
 const signing: SigningConfig = { publicKey: 'pk', privateKey: 'sk', enclaveId: 'org-1' };
 const fetchSpy = vi.fn<typeof fetch>();
-const api: TesserApiConnection = { baseUrl: 'https://api.tesser.xyz', fetch: fetchSpy };
+const api: TesserApiConnection = {
+  fetch: fetchSpy,
+  defaultBaseUrls: [],
+  resolvedBaseUrl: 'https://api.tesser.xyz',
+};
 
 describe('signCreateWallet', () => {
   // Inferred type rather than annotated: `ReturnType<typeof vi.spyOn>` falls
