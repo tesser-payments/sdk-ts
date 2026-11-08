@@ -9,7 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `signStep` supports `TEMPO` and `TEMPO_MODERATO` with `TRANSACTION_TYPE_TEMPO`. The SDK preserves the backend-provided transaction and authorizes customer signing; Tesser adds the sponsor signature.
+- `signStep` supports `TEMPO` and `TEMPO_MODERATO`. The SDK authorizes the Tempo transaction Tesser provides with your API key, without changing it; Tesser completes the transfer and pays the network fee.
+- `LocalSignerOptions.fetch` accepts an optional `fetch` implementation for requests to Tesser, for example to configure a proxy.
+- `TesserAPIError`, `TesserConnectionError`, and `TesserTimeoutError` are exported.
+
+### Changed
+
+- **Breaking:** `LocalSigner` requires an `apiBaseUrl` (`new LocalSigner({ signing, apiBaseUrl })`): `https://api.tesser.xyz` in production, `https://api-sandbox.tesser.xyz` in sandbox. A trailing `/` or `/v1` is removed. A URL that is not https throws `TesserConfigError`.
+- `signCreateWallet` for `stablecoin_ethereum` fetches the request to sign from the Tesser API and checks that it matches your parameters. The method signature and the `base64({ body, stamp })` result are unchanged. Tesser currently supports managed wallets for `stablecoin_ethereum` only.
+- `signCreateWallet` can throw `TesserAPIError`, `TesserConnectionError`, and `TesserTimeoutError` while fetching the request. `TesserConnectionError`, `TesserTimeoutError`, and a `TesserAPIError` with status 429 or 5xx are safe to retry; a `TesserAPIError` with any other 4xx status fails the same way on retry. A fetched request that does not match your parameters throws `TesserSigningError` and nothing is signed.
 
 ## [0.0.4] — 2026-07-07
 
