@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-08
+
 ### Added
 
-- `apiBaseUrl` is optional again and `new LocalSigner({ signing })` works as before 0.1.0. Code written for 0.0.4 compiles and runs unchanged.
+- `apiBaseUrl` is optional again and `new LocalSigner({ signing })` works as before 0.1.0. Code written for 0.0.4 needs no change. `stablecoin_ethereum` wallet creation now makes a network request: it needs outbound HTTPS (see the upgrade note), and `signCreateWallet` can throw `TesserAPIError`, `TesserConnectionError` or `TesserTimeoutError` (see 0.1.0 for which are safe to retry).
 - Without `apiBaseUrl`, the first `stablecoin_ethereum` `signCreateWallet` tries production and, if production does not accept your signing key, sandbox, and remembers the environment for later calls on the same signer. If neither accepts your signing key, the `TesserAPIError` from production is thrown.
 
 ### Changed
