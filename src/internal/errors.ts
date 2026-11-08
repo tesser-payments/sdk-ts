@@ -43,11 +43,11 @@ export interface TesserAPIErrorOptions {
 }
 
 /**
- * Thrown for any non-2xx HTTP response from Tesser. Carries the parsed
- * `errors[]` envelope so consumers can branch on Tesser's documented error
- * codes (e.g. `accounts-3005`, `idempotency-1001`) rather than HTTP status
- * alone. For responses that are not Tesser-shaped (e.g., a Cloudflare 502
- * page), `errors` is the empty array.
+ * Thrown when Tesser answers with an error status or an invalid response.
+ * Carries the parsed `errors[]` envelope so consumers can branch on Tesser's
+ * documented error codes (e.g. `accounts-3005`, `idempotency-1001`) rather
+ * than HTTP status alone. For responses that are not Tesser-shaped (e.g., a
+ * Cloudflare 502 page), `errors` is the empty array.
  */
 export class TesserAPIError extends TesserError {
   override readonly name: string = 'TesserAPIError';

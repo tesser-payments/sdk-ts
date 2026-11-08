@@ -9,6 +9,7 @@ import type {
 } from './internal/types.js';
 import { signCreateWallet } from './signing/create-wallet.js';
 import { signStep } from './signing/sign-step.js';
+import { type TesserApiConnection, createTesserApiConnection } from './signing/unsigned-payload.js';
 
 /**
  * The portion of `SigningConfig` that `LocalSigner` exposes on its instance.
@@ -23,9 +24,8 @@ export interface PublicSigningInfo {
 /**
  * Produces locally-signed activity payloads for Tesser API operations.
  *
- * v0.0.1 supports `signCreateWallet` and `signStep`. A future version will
- * add an optional `client` field to `LocalSignerOptions` for HTTP integration;
- * the addition is purely additive and does not break existing call sites.
+ * Supports `signCreateWallet` and `signStep`. Construction validates that the
+ * signing keys are non-blank and that `apiBaseUrl` is an https URL.
  *
  * Key handling: the private key is stored in an ECMA private field (`#privateKey`)
  * and is not reachable via `signer.signing.privateKey` or any other public
@@ -38,6 +38,7 @@ export interface PublicSigningInfo {
 export class LocalSigner {
   readonly signing: PublicSigningInfo;
   readonly #privateKey: string;
+  readonly #api: TesserApiConnection;
 
   constructor(options: LocalSignerOptions) {
     const s = options.signing;
@@ -46,11 +47,29 @@ export class LocalSigner {
         'LocalSigner: signing.publicKey, signing.privateKey, and signing.enclaveId are required',
       );
     }
+    this.#api = createTesserApiConnection({ apiBaseUrl: options.apiBaseUrl, fetch: options.fetch });
     this.signing = { publicKey: s.publicKey, enclaveId: s.enclaveId };
     this.#privateKey = s.privateKey;
   }
 
-  /** Stamps an `ACTIVITY_TYPE_CREATE_WALLET` Turnkey activity. */
+  /**
+   * Signs a wallet-creation request.
+   *
+   * For `stablecoin_ethereum` the SDK first fetches the request to sign from the
+   * Tesser API and checks that it matches your parameters. Other wallet types are
+   * signed locally without a request to Tesser. The private key never leaves the
+   * process.
+   *
+   * @throws {TesserConfigError} if the wallet type is not valid.
+   * @throws {TesserSigningError} if signing fails or the request fetched from
+   *   Tesser does not match your parameters.
+   * @throws {TesserAPIError} if Tesser answers with an error status or an
+   *   invalid response. Safe to retry for status 429 or 5xx; other 4xx statuses
+   *   fail the same way on retry.
+   * @throws {TesserConnectionError} if the request to Tesser fails at the
+   *   network level. Safe to retry.
+   * @throws {TesserTimeoutError} if the request to Tesser times out. Safe to retry.
+   */
   signCreateWallet(params: CreateWalletParams): Promise<SignedResult> {
     return signCreateWallet(
       {
@@ -59,10 +78,11 @@ export class LocalSigner {
         enclaveId: this.signing.enclaveId,
       },
       params,
+      this.#api,
     );
   }
 
-  /** Stamps an `ACTIVITY_TYPE_SIGN_TRANSACTION_V2` Turnkey activity. */
+  /** Signs a single transfer step. The private key never leaves the process. */
   signStep(step: StepForSigning): Promise<SignedStepResult> {
     return signStep(
       {

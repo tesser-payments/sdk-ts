@@ -186,6 +186,7 @@ try {
       privateKey: env.SIGNING_PRIVATE_KEY,
       enclaveId: env.SIGNING_ENCLAVE_ID,
     },
+    apiBaseUrl: env.API_BASE_URL,
   });
 
   const stepForSigning: StepForSigning = {

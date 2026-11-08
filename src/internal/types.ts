@@ -45,7 +45,7 @@ export interface StepForSigning {
   unsignedTransaction: string;
   /** On-chain address from GET /v1/accounts/{id} → crypto_wallet_address */
   signWith: string;
-  /** Network identifier; one of the supported chains in `NETWORK_TO_TURNKEY_TYPE`. */
+  /** Network identifier; one of the supported networks. */
   network: SupportedNetwork;
 }
 
@@ -63,5 +63,14 @@ export interface SignedStepResult {
 
 export interface LocalSignerOptions {
   signing: SigningConfig;
-  // Reserved for v_next: client?: TesserClient
+  /**
+   * Tesser API base URL: `https://api.tesser.xyz` in production,
+   * `https://api-sandbox.tesser.xyz` in sandbox. A trailing `/` or `/v1` is removed.
+   */
+  apiBaseUrl: string;
+  /**
+   * `fetch` implementation used for requests to Tesser. Inject one to configure a
+   * proxy. Defaults to the global `fetch`.
+   */
+  fetch?: typeof fetch;
 }

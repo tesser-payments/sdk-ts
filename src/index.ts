@@ -18,9 +18,12 @@ export type { SupportedNetwork } from './signing/network-type.js';
 
 export {
   StampError,
+  TesserAPIError,
   TesserConfigError,
+  TesserConnectionError,
   TesserError,
   TesserSigningError,
+  TesserTimeoutError,
 } from './internal/errors.js';
 
 export type { TesserErrorDetail } from './internal/errors.js';

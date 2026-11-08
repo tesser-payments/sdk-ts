@@ -1,9 +1,8 @@
 # @tesser-payments/sdk-ts
 
-Signer-only TypeScript SDK for Tesser API: locally stamp `signCreateWallet` and
-`signStep` activities using Turnkey API keys. The SDK does not own HTTP or
-OAuth — Tesser API supplies the unsigned transaction; this library only stamps
-it. Bring your own client.
+TypeScript SDK for the Tesser API: sign `signCreateWallet` and `signStep`
+requests locally with your signing key. The SDK does not handle OAuth or submit
+requests for you; bring your own client.
 
 ## Install
 
@@ -12,9 +11,7 @@ bun add @tesser-payments/sdk-ts @tesser-payments/types
 ```
 
 `@tesser-payments/types` is a peer dependency — install it alongside the SDK.
-`@turnkey/api-key-stamper` is a runtime dependency (used to locally stamp
-`signCreateWallet` and `signStep` activities) and is installed automatically;
-its Apache-2.0 license aligns with the SDK's. Apache 2.0 licensed.
+Apache 2.0 licensed.
 
 ## Quick start
 
@@ -25,8 +22,9 @@ const signer = new LocalSigner({
   signing: {
     publicKey: process.env.SIGNING_PUBLIC_KEY!,   // 33-byte compressed P-256
     privateKey: process.env.SIGNING_PRIVATE_KEY!,
-    enclaveId: process.env.SIGNING_ENCLAVE_ID!,   // Turnkey suborg ID
+    enclaveId: process.env.SIGNING_ENCLAVE_ID!,
   },
+  apiBaseUrl: 'https://api.tesser.xyz', // sandbox: https://api-sandbox.tesser.xyz
 });
 
 const { signature } = await signer.signCreateWallet({
@@ -52,6 +50,15 @@ const res = await fetch(`${API_BASE_URL}/v1/accounts/wallets`, {
 `signature` is `base64(JSON.stringify({ body, stamp }))` — drop it into the
 Tesser API request body as the documented `signature` field.
 
+`LocalSigner` requires the Tesser API base URL (`https://api.tesser.xyz` or
+`https://api-sandbox.tesser.xyz`); a trailing `/` or `/v1` is removed. Pass an
+optional `fetch` implementation to configure a proxy.
+
+`signCreateWallet` signs a wallet-creation request. For `stablecoin_ethereum`,
+it first fetches the request to sign from the Tesser API and checks that it
+matches your parameters. The private key never leaves your process. Tesser
+currently supports managed wallets for `stablecoin_ethereum` only.
+
 **Private-key handling.** `signer.signing` exposes only `{ publicKey, enclaveId }`.
 The private key lives on the instance as an ECMA private field and is not
 reachable via property access, `console.log`, or `JSON.stringify`. The SDK still
@@ -59,8 +66,7 @@ uses it internally to stamp activities — you just can't pull it back out.
 
 ## `signStep`
 
-`signStep` stamps a Turnkey `ACTIVITY_TYPE_SIGN_TRANSACTION_V2` body for a
-single rebalance step. Pass the unsigned transaction Tesser returned, the
+`signStep` signs a single rebalance step. Pass the unsigned transaction Tesser returned, the
 on-chain `signWith` address, and the network — that's all the SDK needs to
 produce a signature:
 
@@ -90,11 +96,11 @@ await fetch(
 ```
 
 `signStep` returns `{ signature, metadata }`. The `signature` field is what
-the Tesser API needs; `metadata` carries the underlying Turnkey activity body
-and stamp header value for debugging.
+the Tesser API needs; `metadata` carries the signed body and stamp header value
+for debugging.
 
 The `network` field is typed as `SupportedNetwork`, derived from the SDK's
-network-to-Turnkey-type table — so a typo like `'BASE-SEPOLIA'` (hyphen) is a
+supported-network table — so a typo like `'BASE-SEPOLIA'` (hyphen) is a
 compile-time error. If you're pulling the value out of a webhook payload or
 env var, cast it at that boundary.
 
@@ -103,32 +109,41 @@ Supported networks are `BASE`, `BASE_SEPOLIA`, `ETHEREUM`, `ETHEREUM_SEPOLIA`,
 
 ### Tempo transfers
 
-1. Pass the backend-provided native Tempo transaction (`0x76...`), customer
-   wallet address, and `TEMPO` or `TEMPO_MODERATO` to `signStep`.
-2. The SDK stamps a Turnkey request with `TRANSACTION_TYPE_TEMPO`, preserving
-   the transaction bytes exactly. Submit the returned `signature` to the
-   existing Tesser signing endpoint.
-3. Tesser obtains the customer signature from Turnkey, adds its sponsor
-   signature, and broadcasts the sponsored transfer. Tesser manages the
-   sponsor key and network fee.
+1. Pass the Tempo transaction Tesser provides (`0x76...`), your wallet
+   address, and `TEMPO` or `TEMPO_MODERATO` to `signStep`.
+2. The SDK authorizes the transaction with your API key, without changing
+   it. Submit the returned `signature` to the Tesser signing endpoint.
+3. Tesser completes the transfer, broadcasts it, and pays the network fee.
 
-Unknown networks raise `TesserConfigError` before the SDK creates a stamp.
+Unknown networks raise `TesserConfigError` before anything is signed.
 
 ## Error handling
 
 The SDK mirrors Tesser's documented error envelope
 (<https://docs.tesser.xyz/overviews/errors>) rather than inventing a custom
-HTTP-status taxonomy. v0.0.1 only signs locally, so only the signing-side
-errors are exported:
+HTTP-status taxonomy:
 
 ```
 TesserError                       (base; .cause set on all)
 ├── TesserConfigError             bad input at construction or call site
-└── TesserSigningError            local signing failure
-    └── StampError                Turnkey ApiKeyStamper failed
+├── TesserAPIError                Tesser answered with an error status or
+│                                 an invalid response
+├── TesserConnectionError         the request to Tesser failed at the network level
+├── TesserTimeoutError            the request to Tesser timed out
+└── TesserSigningError            signing failure, or a fetched request that
+    │                             does not match your parameters
+    └── StampError                the signing key could not sign
 ```
 
-All three carry the original failure as `.cause` and can be discriminated via
+`TesserAPIError`, `TesserConnectionError`, and `TesserTimeoutError` come from
+the request `signCreateWallet` makes to Tesser for `stablecoin_ethereum`.
+`TesserAPIError` carries `status`, `headers`, `requestId`, and the parsed
+`errors[]` (with `errorCode` for the first one). `TesserConnectionError`,
+`TesserTimeoutError`, and a `TesserAPIError` with status 429 or 5xx are safe to
+retry; a `TesserAPIError` with any other 4xx status fails the same way on
+retry.
+
+Each error carries the original failure as `.cause` and can be discriminated via
 `instanceof` or the static `.is()` guard:
 
 ```typescript
@@ -138,7 +153,7 @@ try {
   await signer.signStep(step);
 } catch (err) {
   if (StampError.is(err)) {
-    // Turnkey rejected the stamp — usually a key-format problem.
+    // The key could not sign — usually a key-format problem.
   }
   if (TesserError.is(err)) {
     console.error('Signing failed', { name: err.name, cause: err.cause });
@@ -147,29 +162,19 @@ try {
 }
 ```
 
-HTTP-side errors (`TesserAPIError`, `TesserConnectionError`,
-`TesserTimeoutError`) will return when the optional bundled client lands in a
-future version. Until then, model HTTP failures with whatever your `fetch`
-wrapper produces.
-
 ## Setup notes
 
-`signing.publicKey` must be the **33-byte compressed** form Turnkey uses for
+`signing.publicKey` must be the **33-byte compressed** form Tesser uses for
 API-key auth lookups (66 hex chars, prefix `02` or `03`). Dashboards that
 display the 65-byte uncompressed form need to be compressed before use:
 
 ```sh
-bunx -p @turnkey/crypto node -e \
-  'const c = require("@turnkey/crypto"); \
-   const u = process.argv[1].replace(/^0x/i,""); \
-   const b = Buffer.from(u, "hex"); \
-   console.log(Buffer.from(c.compressRawPublicKey(b)).toString("hex"))' \
+node -e 'const u = process.argv[1].replace(/^0x/i, ""); console.log(require("node:crypto").ECDH.convertKey(u, "prime256v1", "hex", "hex", "compressed"))' \
   04...your-uncompressed-key...
 ```
 
-If a key is registered on Turnkey in uncompressed form, Turnkey rejects
-auth with `PUBLIC_KEY_NOT_FOUND` even when the keypair is logically
-correct — re-register the key in compressed form to fix.
+If a key is registered in uncompressed form, signing is rejected even when the
+keypair is logically correct — re-register the key in compressed form to fix.
 
 ## Examples
 
@@ -187,9 +192,7 @@ copy [`.env.example`](./.env.example) and fill in the values first.
 ## Out of scope
 
 - **`TesserClient`** — the previous bundled HTTP client (`getAccountAddress`,
-  retry/timeout/logger plumbing) is intentionally not in v0.0.1. We expect to
-  re-add it later as an opt-in `LocalSignerOptions.client` field; that change
-  is purely additive and will not break v0.0.1 call sites.
+  retry/timeout/logger plumbing) is intentionally not included.
 - **Webhook signature verification** — the header name and HMAC algorithm
   aren't currently documented in public Tesser docs.
 - **Solana / Stellar `signCreateWallet`** — exported as `@experimental` types;

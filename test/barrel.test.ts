@@ -8,9 +8,12 @@ const EXPECTED_PUBLIC_NAMES = [
   // value exports
   'LocalSigner',
   'StampError',
+  'TesserAPIError',
   'TesserConfigError',
+  'TesserConnectionError',
   'TesserError',
   'TesserSigningError',
+  'TesserTimeoutError',
 ] as const;
 
 describe('public barrel', () => {
@@ -22,12 +25,7 @@ describe('public barrel', () => {
 
   it('does not export removed-in-v0.0.1 names', () => {
     // Names that lived in the v0.0.0 surface and must NOT leak into v0.0.1.
-    const removed = [
-      'TesserClient',
-      'TesserAPIError',
-      'TesserConnectionError',
-      'TesserTimeoutError',
-    ];
+    const removed = ['TesserClient'];
     for (const name of removed) {
       expect(sdk).not.toHaveProperty(name);
     }

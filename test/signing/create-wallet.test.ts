@@ -4,8 +4,11 @@ import { TesserConfigError } from '../../src/internal/errors.js';
 import type { SigningConfig, WalletType } from '../../src/internal/types.js';
 import { signCreateWallet } from '../../src/signing/create-wallet.js';
 import * as stampModule from '../../src/signing/stamp.js';
+import type { TesserApiConnection } from '../../src/signing/unsigned-payload.js';
 
 const signing: SigningConfig = { publicKey: 'pk', privateKey: 'sk', enclaveId: 'org-1' };
+const fetchSpy = vi.fn<typeof fetch>();
+const api: TesserApiConnection = { baseUrl: 'https://api.tesser.xyz', fetch: fetchSpy };
 
 describe('signCreateWallet', () => {
   // Inferred type rather than annotated: `ReturnType<typeof vi.spyOn>` falls
@@ -22,33 +25,30 @@ describe('signCreateWallet', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    fetchSpy.mockReset();
   });
 
-  it('builds an ACTIVITY_TYPE_CREATE_WALLET payload with the Ethereum account spec', async () => {
-    await signCreateWallet(signing, { name: 'Foo', type: 'stablecoin_ethereum' });
-    expect(stampSpy).toHaveBeenCalledTimes(1);
+  it.each(['stablecoin_solana', 'stablecoin_stellar'] as const)(
+    'builds an ACTIVITY_TYPE_CREATE_WALLET payload locally for %s without a request to Tesser',
+    async (type) => {
+      await signCreateWallet(signing, { name: 'Foo', type }, api);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(stampSpy).toHaveBeenCalledTimes(1);
 
-    const [keysArg, bodyArg] = stampSpy.mock.calls[0] as [unknown, string];
-    expect(keysArg).toEqual({ publicKey: 'pk', privateKey: 'sk' });
+      const [keysArg, bodyArg] = stampSpy.mock.calls[0] as [unknown, string];
+      expect(keysArg).toEqual({ publicKey: 'pk', privateKey: 'sk' });
 
-    const parsed = JSON.parse(bodyArg);
-    expect(parsed.type).toBe('ACTIVITY_TYPE_CREATE_WALLET');
-    expect(parsed.organizationId).toBe('org-1');
-    expect(typeof parsed.timestampMs).toBe('string');
-    expect(parsed.parameters.walletName).toBe('Foo');
-    expect(parsed.parameters).not.toHaveProperty('walletType');
-    expect(parsed.parameters.accounts).toEqual([
-      {
-        curve: 'CURVE_SECP256K1',
-        pathFormat: 'PATH_FORMAT_BIP32',
-        path: "m/44'/60'/0'/0/0",
-        addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
-      },
-    ]);
-  });
+      const parsed = JSON.parse(bodyArg);
+      expect(parsed.type).toBe('ACTIVITY_TYPE_CREATE_WALLET');
+      expect(parsed.organizationId).toBe('org-1');
+      expect(typeof parsed.timestampMs).toBe('string');
+      expect(parsed.parameters.walletName).toBe('Foo');
+      expect(parsed.parameters).not.toHaveProperty('walletType');
+    },
+  );
 
   it('uses ED25519 + Solana address format for stablecoin_solana', async () => {
-    await signCreateWallet(signing, { name: 'S', type: 'stablecoin_solana' });
+    await signCreateWallet(signing, { name: 'S', type: 'stablecoin_solana' }, api);
     const parsed = JSON.parse((stampSpy.mock.calls[0] as [unknown, string])[1]);
     expect(parsed.parameters.accounts[0].curve).toBe('CURVE_ED25519');
     expect(parsed.parameters.accounts[0].addressFormat).toBe('ADDRESS_FORMAT_SOLANA');
@@ -56,7 +56,7 @@ describe('signCreateWallet', () => {
   });
 
   it('uses ED25519 + Stellar address format for stablecoin_stellar', async () => {
-    await signCreateWallet(signing, { name: 'St', type: 'stablecoin_stellar' });
+    await signCreateWallet(signing, { name: 'St', type: 'stablecoin_stellar' }, api);
     const parsed = JSON.parse((stampSpy.mock.calls[0] as [unknown, string])[1]);
     expect(parsed.parameters.accounts[0].curve).toBe('CURVE_ED25519');
     expect(parsed.parameters.accounts[0].addressFormat).toBe('ADDRESS_FORMAT_XLM');
@@ -65,13 +65,14 @@ describe('signCreateWallet', () => {
 
   it('throws TesserConfigError on an invalid WalletType (defends against bad string casts)', async () => {
     await expect(
-      signCreateWallet(signing, { name: 'X', type: 'stablecoin_ethereuum' as WalletType }),
+      signCreateWallet(signing, { name: 'X', type: 'stablecoin_ethereuum' as WalletType }, api),
     ).rejects.toBeInstanceOf(TesserConfigError);
     expect(stampSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('returns SignedResult with base64-encoded {body, stamp} signature and raw metadata', async () => {
-    const result = await signCreateWallet(signing, { name: 'Bar', type: 'stablecoin_solana' });
+    const result = await signCreateWallet(signing, { name: 'Bar', type: 'stablecoin_solana' }, api);
 
     // signature is base64(JSON.stringify({ body, stamp }))
     const decoded = JSON.parse(Buffer.from(result.signature, 'base64').toString('utf8'));

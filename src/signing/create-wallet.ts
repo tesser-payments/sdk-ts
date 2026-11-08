@@ -7,10 +7,15 @@ import type {
   WalletType,
 } from '../internal/types.js';
 import { stamp } from './stamp.js';
+import {
+  type TesserApiConnection,
+  fetchCheckedCreateWalletAccountsBody,
+} from './unsigned-payload.js';
 
-type Curve = 'CURVE_SECP256K1' | 'CURVE_ED25519';
+type Curve = 'CURVE_ED25519';
 type PathFormat = 'PATH_FORMAT_BIP32';
-type AddressFormat = 'ADDRESS_FORMAT_ETHEREUM' | 'ADDRESS_FORMAT_SOLANA' | 'ADDRESS_FORMAT_XLM';
+type AddressFormat = 'ADDRESS_FORMAT_SOLANA' | 'ADDRESS_FORMAT_XLM';
+type LocallyBuiltWalletType = Exclude<WalletType, 'stablecoin_ethereum'>;
 
 interface AccountSpec {
   curve: Curve;
@@ -19,18 +24,9 @@ interface AccountSpec {
   addressFormat: AddressFormat;
 }
 
-// Per-wallet-type Turnkey account specs. The Ethereum mapping mirrors Tesser's
-// reference standalone signer; the Solana and Stellar mappings are best-guesses
-// pending Phase A staging verification (see spec Open Item #2).
-const WALLET_TYPE_ACCOUNTS: Record<WalletType, AccountSpec[]> = {
-  stablecoin_ethereum: [
-    {
-      curve: 'CURVE_SECP256K1',
-      pathFormat: 'PATH_FORMAT_BIP32',
-      path: "m/44'/60'/0'/0/0",
-      addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
-    },
-  ],
+// Per-wallet-type Turnkey account specs. The Solana and Stellar mappings are
+// best-guesses pending Phase A staging verification (see spec Open Item #2).
+const WALLET_TYPE_ACCOUNTS: Record<LocallyBuiltWalletType, AccountSpec[]> = {
   stablecoin_solana: [
     {
       curve: 'CURVE_ED25519',
@@ -49,11 +45,16 @@ const WALLET_TYPE_ACCOUNTS: Record<WalletType, AccountSpec[]> = {
   ],
 };
 
-const VALID_WALLET_TYPES = Object.keys(WALLET_TYPE_ACCOUNTS) as WalletType[];
+const VALID_WALLET_TYPES: WalletType[] = [
+  'stablecoin_ethereum',
+  'stablecoin_solana',
+  'stablecoin_stellar',
+];
 
 export async function signCreateWallet(
   signing: SigningConfig,
   params: CreateWalletParams,
+  api: TesserApiConnection,
 ): Promise<SignedResult> {
   // Runtime validation — TS's `Record<WalletType, ...>` lookup does not surface
   // `undefined` even with `noUncheckedIndexedAccess`, so a bad string cast (e.g.
@@ -64,17 +65,8 @@ export async function signCreateWallet(
         `Valid values: ${VALID_WALLET_TYPES.join(', ')}.`,
     );
   }
-  const accounts = WALLET_TYPE_ACCOUNTS[params.type];
 
-  const body = JSON.stringify({
-    type: 'ACTIVITY_TYPE_CREATE_WALLET',
-    timestampMs: String(Date.now()),
-    organizationId: signing.enclaveId,
-    parameters: {
-      walletName: params.name,
-      accounts,
-    },
-  });
+  const body = await resolveCreateWalletBody({ signing, params, api });
 
   const result = await stamp(
     { publicKey: signing.publicKey, privateKey: signing.privateKey },
@@ -95,4 +87,36 @@ export async function signCreateWallet(
       body,
     },
   };
+}
+
+async function resolveCreateWalletBody(options: {
+  signing: SigningConfig;
+  params: CreateWalletParams;
+  api: TesserApiConnection;
+}): Promise<string> {
+  const { signing, params, api } = options;
+  if (params.type === 'stablecoin_ethereum') {
+    return fetchCheckedCreateWalletAccountsBody({ api, signing, params });
+  }
+  return buildCreateWalletBody({
+    enclaveId: signing.enclaveId,
+    name: params.name,
+    type: params.type,
+  });
+}
+
+function buildCreateWalletBody(options: {
+  enclaveId: string;
+  name: string;
+  type: LocallyBuiltWalletType;
+}): string {
+  return JSON.stringify({
+    type: 'ACTIVITY_TYPE_CREATE_WALLET',
+    timestampMs: String(Date.now()),
+    organizationId: options.enclaveId,
+    parameters: {
+      walletName: options.name,
+      accounts: WALLET_TYPE_ACCOUNTS[options.type],
+    },
+  });
 }
