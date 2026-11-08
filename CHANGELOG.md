@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-11-08
+
 ### Added
 
-- `signStep` supports `TEMPO` and `TEMPO_MODERATO`. The SDK authorizes the Tempo transaction Tesser provides with your API key, without changing it; Tesser completes the transfer and pays the network fee.
+- `signStep` supports `TEMPO` and `TEMPO_MODERATO`. The SDK authorizes the Tempo transaction Tesser provides with your API key, without changing it; Tesser completes the transfer, broadcasts it, and pays the network fee.
 - `LocalSignerOptions.fetch` accepts an optional `fetch` implementation for requests to Tesser, for example to configure a proxy.
 - `TesserAPIError`, `TesserConnectionError`, and `TesserTimeoutError` are exported.
 
