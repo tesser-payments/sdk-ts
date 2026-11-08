@@ -10,12 +10,18 @@ const G_COMPRESSED = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b
 
 vi.mock('@turnkey/api-key-stamper', () => {
   return {
-    ApiKeyStamper: vi.fn().mockImplementation(({ apiPublicKey }) => ({
-      stamp: vi.fn().mockImplementation(async (body: string) => ({
-        stampHeaderName: 'X-Stamp',
-        stampHeaderValue: `stamp-of-${body}::${apiPublicKey}`,
-      })),
-    })),
+    ApiKeyStamper: vi.fn(
+      class {
+        stamp;
+
+        constructor({ apiPublicKey }: { apiPublicKey: string }) {
+          this.stamp = vi.fn(async (body: string) => ({
+            stampHeaderName: 'X-Stamp',
+            stampHeaderValue: `stamp-of-${body}::${apiPublicKey}`,
+          }));
+        }
+      },
+    ),
   };
 });
 
@@ -51,23 +57,21 @@ describe('stamp', () => {
     const { ApiKeyStamper } = await import('@turnkey/api-key-stamper');
     const stamperMock = vi.mocked(ApiKeyStamper);
     stamperMock.mockImplementationOnce(
-      () =>
-        ({
-          stamp: async () => {
-            throw new Error('boom');
-          },
-        }) as never,
+      class {
+        stamp = async () => {
+          throw new Error('boom');
+        };
+      } as never,
     );
 
     await expect(stamp(validKeys, '{}')).rejects.toBeInstanceOf(StampError);
 
     stamperMock.mockImplementationOnce(
-      () =>
-        ({
-          stamp: async () => {
-            throw new Error('boom');
-          },
-        }) as never,
+      class {
+        stamp = async () => {
+          throw new Error('boom');
+        };
+      } as never,
     );
     try {
       await stamp(validKeys, '{}');
