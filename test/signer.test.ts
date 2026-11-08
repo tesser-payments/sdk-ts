@@ -6,6 +6,7 @@ import * as createWalletModule from '../src/signing/create-wallet.js';
 import * as signStepModule from '../src/signing/sign-step.js';
 
 const apiBaseUrl = 'https://api.tesser.xyz';
+const defaultBaseUrls = ['https://api.tesser.xyz', 'https://api-sandbox.tesser.xyz'];
 
 const signing: SigningConfig = {
   publicKey: '02'.padEnd(66, 'a'),
@@ -35,6 +36,31 @@ describe('LocalSigner', () => {
     expect(inspected).not.toContain(signing.privateKey);
   });
 
+  it('constructs with only the signing config, as before 0.1.0', () => {
+    const s = new LocalSigner({
+      signing: {
+        publicKey: signing.publicKey,
+        privateKey: signing.privateKey,
+        enclaveId: signing.enclaveId,
+      },
+    });
+    expect(s.signing.enclaveId).toBe(signing.enclaveId);
+  });
+
+  it('constructs when apiBaseUrl is explicitly undefined', () => {
+    expect(() => new LocalSigner({ signing, apiBaseUrl: undefined })).not.toThrow();
+  });
+
+  it('checks the signing config before apiBaseUrl', () => {
+    expect(
+      () =>
+        new LocalSigner({
+          signing: { ...signing, publicKey: '' },
+          apiBaseUrl: 'http://bad.example',
+        }),
+    ).toThrow(/signing\.publicKey/);
+  });
+
   it.each([
     ['blank publicKey', { ...signing, publicKey: '' }],
     ['blank privateKey', { ...signing, privateKey: '' }],
@@ -44,7 +70,8 @@ describe('LocalSigner', () => {
   });
 
   it.each([
-    ['missing', undefined],
+    ['null', null],
+    ['empty', ''],
     ['plain http on a public host', 'http://api.tesser.xyz'],
     ['not a URL', 'api.tesser.xyz'],
   ])('throws TesserConfigError when apiBaseUrl is %s', (_label, badApiBaseUrl) => {
@@ -68,7 +95,11 @@ describe('LocalSigner', () => {
     expect(spy).toHaveBeenCalledWith(
       signing,
       { name: 'w', type: 'stablecoin_ethereum' },
-      { baseUrl: 'https://api-sandbox.tesser.xyz', fetch: injectedFetch },
+      {
+        fetch: injectedFetch,
+        defaultBaseUrls,
+        resolvedBaseUrl: 'https://api-sandbox.tesser.xyz',
+      },
     );
   });
 
@@ -82,7 +113,21 @@ describe('LocalSigner', () => {
     expect(spy).toHaveBeenCalledWith(
       signing,
       { name: 'w', type: 'stablecoin_ethereum' },
-      { baseUrl: 'https://api.tesser.xyz', fetch: globalThis.fetch },
+      { fetch: globalThis.fetch, defaultBaseUrls, resolvedBaseUrl: 'https://api.tesser.xyz' },
+    );
+  });
+
+  it('leaves the environment unresolved when apiBaseUrl is not set', async () => {
+    const spy = vi.spyOn(createWalletModule, 'signCreateWallet').mockResolvedValue({
+      signature: 'sig',
+      metadata: { stampHeaderName: 'X-Stamp', stampHeaderValue: 'v', body: '{}' },
+    });
+    const s = new LocalSigner({ signing });
+    await s.signCreateWallet({ name: 'w', type: 'stablecoin_ethereum' });
+    expect(spy).toHaveBeenCalledWith(
+      signing,
+      { name: 'w', type: 'stablecoin_ethereum' },
+      { fetch: globalThis.fetch, defaultBaseUrls, resolvedBaseUrl: undefined },
     );
   });
 

@@ -12,6 +12,7 @@ import { signCreateWallet } from '../../src/signing/create-wallet.js';
 import * as stampModule from '../../src/signing/stamp.js';
 import {
   type TesserApiConnection,
+  createTesserApiConnection,
   normalizeApiBaseUrl,
 } from '../../src/signing/unsigned-payload.js';
 
@@ -21,6 +22,10 @@ const ETHEREUM_RESPONSE = readFileSync(
 );
 const ETHEREUM_BODY: string = JSON.parse(ETHEREUM_RESPONSE).data.body;
 const ORGANIZATION_ID = '846abdbb-d019-4d97-9404-0f7cfc113b2c';
+const PRODUCTION_URL = 'https://api.tesser.xyz';
+const SANDBOX_URL = 'https://api-sandbox.tesser.xyz';
+const PRODUCTION_HOST = 'api.tesser.xyz';
+const SANDBOX_HOST = 'api-sandbox.tesser.xyz';
 const WALLET_NAME = 'sdk-ts-stg-1794141558';
 const NOW_MS = 1_700_000_000_000;
 const PACKAGE_VERSION: string = JSON.parse(
@@ -63,7 +68,69 @@ function failingWith(error: unknown) {
 }
 
 function connectionTo(fetchImplementation: typeof fetch): TesserApiConnection {
-  return { baseUrl: 'https://api.tesser.xyz', fetch: fetchImplementation };
+  return createTesserApiConnection({ apiBaseUrl: PRODUCTION_URL, fetch: fetchImplementation });
+}
+
+function detectingConnection(fetchImplementation: typeof fetch): TesserApiConnection {
+  return createTesserApiConnection({ apiBaseUrl: undefined, fetch: fetchImplementation });
+}
+
+type Responder = () => Promise<Response>;
+
+function routingByHost(routes: Record<string, Responder[]>): {
+  fetch: typeof fetch;
+  requests: RecordedRequest[];
+  hosts: () => string[];
+} {
+  const requests: RecordedRequest[] = [];
+  const fetchStub = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    requests.push({ url, init: init ?? {} });
+    const respond = routes[new URL(url).host]?.shift();
+    if (respond === undefined) {
+      throw new Error(`unexpected request to ${url}`);
+    }
+    return respond();
+  }) as typeof fetch;
+  const hosts = () => requests.map((request) => new URL(request.url).host);
+  return { fetch: fetchStub, requests, hosts };
+}
+
+function answer(status: number, body: string, headers: Record<string, string> = {}): Responder {
+  return async () => new Response(body, { status, headers });
+}
+
+function answerOk(body = ETHEREUM_BODY): Responder {
+  return answer(200, responseWithBody(body));
+}
+
+function answerWithErrorCode(status: number, errorCode: string, requestId: string): Responder {
+  const envelope = JSON.stringify({
+    errors: [{ error_code: errorCode, error_message: 'Request rejected.' }],
+  });
+  return answer(status, envelope, { 'zp-rid': requestId });
+}
+
+function answerStampRejected(requestId: string): Responder {
+  return answerWithErrorCode(401, 'signing-4010', requestId);
+}
+
+function answerFailingWith(error: unknown): Responder {
+  return async () => {
+    throw error;
+  };
+}
+
+function stampHeaderOf(request: RecordedRequest | undefined): unknown {
+  return (request?.init.headers as Record<string, string> | undefined)?.['X-Stamp'];
+}
+
+async function signEthereumWallet(api: TesserApiConnection) {
+  return signCreateWallet(signing, ethereumParams, api);
+}
+
+async function signEthereumWalletError(api: TesserApiConnection): Promise<unknown> {
+  return signEthereumWallet(api).catch((caught: unknown) => caught);
 }
 
 function responseWithBody(body: string): string {
@@ -77,6 +144,7 @@ interface EditableAccount {
 
 interface EditablePayload {
   type: string;
+  timestampMs: string;
   organizationId: string;
   parameters: { accounts: EditableAccount[] } | undefined;
 }
@@ -357,6 +425,191 @@ describe('signCreateWallet request failures', () => {
 
     await expect(pending).rejects.toBeInstanceOf(TesserTimeoutError);
   });
+});
+
+describe('signCreateWallet without apiBaseUrl', () => {
+  it('uses production when production accepts the signing key and remembers it', async () => {
+    const stub = routingByHost({ [PRODUCTION_HOST]: [answerOk(), answerOk()] });
+    const api = detectingConnection(stub.fetch);
+
+    const result = await signEthereumWallet(api);
+    await signEthereumWallet(api);
+
+    expect(result.metadata.body).toBe(ETHEREUM_BODY);
+    expect(stub.hosts()).toEqual([PRODUCTION_HOST, PRODUCTION_HOST]);
+    expect(api.resolvedBaseUrl).toBe(PRODUCTION_URL);
+  });
+
+  it('falls back to sandbox with a fresh query and stamp when production rejects the stamp', async () => {
+    const sandboxBody = ethereumBodyWith((payload) => {
+      payload.timestampMs = 'sandbox';
+    });
+    const stub = routingByHost({
+      [PRODUCTION_HOST]: [answerStampRejected('production-request')],
+      [SANDBOX_HOST]: [answerOk(sandboxBody)],
+    });
+    vi.mocked(Date.now)
+      .mockReturnValueOnce(NOW_MS)
+      .mockReturnValueOnce(NOW_MS + 1);
+    const api = detectingConnection(stub.fetch);
+
+    const result = await signEthereumWallet(api);
+
+    expect(stub.hosts()).toEqual([PRODUCTION_HOST, SANDBOX_HOST]);
+    expect(stub.requests[0]?.url).toContain(`timestampMs=${NOW_MS}`);
+    expect(stub.requests[1]?.url).toContain(`timestampMs=${NOW_MS + 1}`);
+    expect(stampHeaderOf(stub.requests[1])).toBe(
+      `stamp-of:{"organizationId":"${ORGANIZATION_ID}","name":"${WALLET_NAME}","type":"stablecoin_ethereum","timestampMs":"${NOW_MS + 1}"}`,
+    );
+    expect(stampHeaderOf(stub.requests[0])).not.toBe(stampHeaderOf(stub.requests[1]));
+    expect(result.metadata.body).toBe(sandboxBody);
+    expect(decodeSignature(result.signature).body).toBe(sandboxBody);
+    expect(api.resolvedBaseUrl).toBe(SANDBOX_URL);
+  });
+
+  it('sends later requests only to the remembered environment', async () => {
+    const stub = routingByHost({
+      [PRODUCTION_HOST]: [answerStampRejected('production-request')],
+      [SANDBOX_HOST]: [answerOk(), answerOk()],
+    });
+    const api = detectingConnection(stub.fetch);
+
+    await signEthereumWallet(api);
+    await signEthereumWallet(api);
+
+    expect(stub.hosts()).toEqual([PRODUCTION_HOST, SANDBOX_HOST, SANDBOX_HOST]);
+  });
+
+  it.each([
+    ['another error code', answerWithErrorCode(401, 'auth-4010', 'production-request')],
+    ['no error envelope', answer(401, 'Unauthorized')],
+    ['the stamp error code on status 403', answerWithErrorCode(403, 'signing-4010', 'request')],
+    ['the stamp error code on status 400', answerWithErrorCode(400, 'signing-4010', 'request')],
+    ['status 429', answer(429, '{"errors":[]}')],
+    ['status 500', answer(500, '{"errors":[]}')],
+    ['status 502', answer(502, '<html>Bad Gateway</html>')],
+  ])('does not fall back when production answers with %s', async (_label, production) => {
+    const stub = routingByHost({ [PRODUCTION_HOST]: [production] });
+    const api = detectingConnection(stub.fetch);
+
+    const error = await signEthereumWalletError(api);
+
+    expect(error).toBeInstanceOf(TesserAPIError);
+    expect(stub.hosts()).toEqual([PRODUCTION_HOST]);
+    expect(api.resolvedBaseUrl).toBeUndefined();
+  });
+
+  it.each([
+    ['a timeout', new DOMException('The operation timed out.', 'TimeoutError'), TesserTimeoutError],
+    [
+      'a connection failure',
+      new TypeError('fetch failed', { cause: new Error('ECONNRESET') }),
+      TesserConnectionError,
+    ],
+  ])('does not fall back on %s', async (_label, failure, expectedError) => {
+    const stub = routingByHost({ [PRODUCTION_HOST]: [answerFailingWith(failure)] });
+    const api = detectingConnection(stub.fetch);
+
+    const error = await signEthereumWalletError(api);
+
+    expect(error).toBeInstanceOf(expectedError);
+    expect(stub.hosts()).toEqual([PRODUCTION_HOST]);
+  });
+
+  it('does not fall back or remember production when its body fails the checks', async () => {
+    const mismatchedBody = ethereumBodyWith((payload) => {
+      onlyAccount(payload).name = 'another-wallet';
+    });
+    const stub = routingByHost({ [PRODUCTION_HOST]: [answerOk(mismatchedBody), answerOk()] });
+    const api = detectingConnection(stub.fetch);
+
+    const error = await signEthereumWalletError(api);
+
+    expect(error).toBeInstanceOf(TesserSigningError);
+    expect(stub.hosts()).toEqual([PRODUCTION_HOST]);
+    expect(api.resolvedBaseUrl).toBeUndefined();
+  });
+
+  it('throws the production error when neither environment accepts the signing key', async () => {
+    const stub = routingByHost({
+      [PRODUCTION_HOST]: [answerStampRejected('production-request')],
+      [SANDBOX_HOST]: [answerStampRejected('sandbox-request')],
+    });
+    const api = detectingConnection(stub.fetch);
+
+    const error = (await signEthereumWalletError(api)) as TesserAPIError;
+
+    expect(error).toBeInstanceOf(TesserAPIError);
+    expect(error.status).toBe(401);
+    expect(error.requestId).toBe('production-request');
+    expect(error.headers?.get('zp-rid')).toBe('production-request');
+    expect(stub.hosts()).toEqual([PRODUCTION_HOST, SANDBOX_HOST]);
+    expect(api.resolvedBaseUrl).toBeUndefined();
+  });
+
+  it('throws the sandbox error when sandbox fails for another reason', async () => {
+    const stub = routingByHost({
+      [PRODUCTION_HOST]: [answerStampRejected('production-request')],
+      [SANDBOX_HOST]: [answer(503, 'unavailable', { 'zp-rid': 'sandbox-request' })],
+    });
+    const api = detectingConnection(stub.fetch);
+
+    const error = (await signEthereumWalletError(api)) as TesserAPIError;
+
+    expect(error).toBeInstanceOf(TesserAPIError);
+    expect(error.status).toBe(503);
+    expect(error.requestId).toBe('sandbox-request');
+    expect(api.resolvedBaseUrl).toBeUndefined();
+  });
+
+  it('does not fall back from a remembered environment', async () => {
+    const stub = routingByHost({
+      [PRODUCTION_HOST]: [answerStampRejected('production-request')],
+      [SANDBOX_HOST]: [answerOk(), answerStampRejected('sandbox-request')],
+    });
+    const api = detectingConnection(stub.fetch);
+
+    await signEthereumWallet(api);
+    const error = (await signEthereumWalletError(api)) as TesserAPIError;
+
+    expect(error.requestId).toBe('sandbox-request');
+    expect(stub.hosts()).toEqual([PRODUCTION_HOST, SANDBOX_HOST, SANDBOX_HOST]);
+    expect(api.resolvedBaseUrl).toBe(SANDBOX_URL);
+  });
+
+  it('lets concurrent first calls both detect sandbox', async () => {
+    const stub = routingByHost({
+      [PRODUCTION_HOST]: [
+        answerStampRejected('production-request'),
+        answerStampRejected('production-request'),
+      ],
+      [SANDBOX_HOST]: [answerOk(), answerOk()],
+    });
+    const api = detectingConnection(stub.fetch);
+
+    const results = await Promise.all([signEthereumWallet(api), signEthereumWallet(api)]);
+
+    expect(results.map((result) => result.metadata.body)).toEqual([ETHEREUM_BODY, ETHEREUM_BODY]);
+    expect(api.resolvedBaseUrl).toBe(SANDBOX_URL);
+  });
+});
+
+describe('signCreateWallet with apiBaseUrl', () => {
+  it.each([PRODUCTION_URL, SANDBOX_URL])(
+    'sends one request to %s and does not fall back',
+    async (apiBaseUrl) => {
+      const stub = routingByHost({
+        [PRODUCTION_HOST]: [answerStampRejected('production-request')],
+        [SANDBOX_HOST]: [answerStampRejected('sandbox-request')],
+      });
+      const api = createTesserApiConnection({ apiBaseUrl, fetch: stub.fetch });
+
+      const error = await signEthereumWalletError(api);
+
+      expect(error).toBeInstanceOf(TesserAPIError);
+      expect(stub.hosts()).toEqual([new URL(apiBaseUrl).host]);
+    },
+  );
 });
 
 describe('normalizeApiBaseUrl', () => {

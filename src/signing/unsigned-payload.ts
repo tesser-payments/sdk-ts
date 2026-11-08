@@ -17,10 +17,15 @@ const ETHEREUM_ADDRESS_FORMAT = 'ADDRESS_FORMAT_ETHEREUM';
 const UNSIGNED_PAYLOAD_TIMEOUT_MS = 10_000;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const MAX_FAILURE_CHAIN_DEPTH = 10;
+const PRODUCTION_API_BASE_URL = 'https://api.tesser.xyz';
+const SANDBOX_API_BASE_URL = 'https://api-sandbox.tesser.xyz';
+const DEFAULT_API_BASE_URLS: readonly string[] = [PRODUCTION_API_BASE_URL, SANDBOX_API_BASE_URL];
+const STAMP_REJECTED_ERROR_CODE = 'signing-4010';
 
 export interface TesserApiConnection {
-  baseUrl: string;
   fetch: typeof fetch;
+  defaultBaseUrls: readonly string[];
+  resolvedBaseUrl: string | undefined;
 }
 
 interface UnsignedPayloadQuery {
@@ -38,14 +43,27 @@ interface UnsignedPayloadResponse {
 
 type JsonObject = Record<string, unknown>;
 
-export function createTesserApiConnection(options: {
+export function createTesserApiConnection({
+  apiBaseUrl,
+  fetch: injectedFetch,
+  defaultBaseUrls = DEFAULT_API_BASE_URLS,
+}: {
   apiBaseUrl: unknown;
   fetch: typeof fetch | undefined;
+  defaultBaseUrls?: readonly string[];
 }): TesserApiConnection {
   return {
-    baseUrl: normalizeApiBaseUrl(options.apiBaseUrl),
-    fetch: resolveFetchImplementation(options.fetch),
+    fetch: resolveFetchImplementation(injectedFetch),
+    defaultBaseUrls,
+    resolvedBaseUrl: resolveExplicitApiBaseUrl(apiBaseUrl),
   };
+}
+
+function resolveExplicitApiBaseUrl(apiBaseUrl: unknown): string | undefined {
+  if (apiBaseUrl === undefined) {
+    return undefined;
+  }
+  return normalizeApiBaseUrl(apiBaseUrl);
 }
 
 function resolveFetchImplementation(injectedFetch: typeof fetch | undefined): typeof fetch {
@@ -105,14 +123,56 @@ export async function fetchCheckedCreateWalletAccountsBody(options: {
   params: CreateWalletParams;
 }): Promise<string> {
   const { api, signing, params } = options;
+  if (api.resolvedBaseUrl !== undefined) {
+    return fetchCheckedBodyFrom(api.resolvedBaseUrl, api.fetch, signing, params);
+  }
+  return detectEnvironmentAndFetchCheckedBody({ api, signing, params });
+}
+
+async function detectEnvironmentAndFetchCheckedBody(options: {
+  api: TesserApiConnection;
+  signing: SigningConfig;
+  params: CreateWalletParams;
+}): Promise<string> {
+  const { api, signing, params } = options;
+  let firstStampRejection: TesserAPIError | undefined;
+  for (const baseUrl of api.defaultBaseUrls) {
+    try {
+      const body = await fetchCheckedBodyFrom(baseUrl, api.fetch, signing, params);
+      api.resolvedBaseUrl = baseUrl;
+      return body;
+    } catch (error) {
+      if (!isStampRejected(error)) {
+        throw error;
+      }
+      firstStampRejection ??= error;
+    }
+  }
+  throw firstStampRejection;
+}
+
+function isStampRejected(error: unknown): error is TesserAPIError {
+  return (
+    error instanceof TesserAPIError &&
+    error.status === 401 &&
+    error.errorCode === STAMP_REJECTED_ERROR_CODE
+  );
+}
+
+async function fetchCheckedBodyFrom(
+  baseUrl: string,
+  fetchImplementation: typeof fetch,
+  signing: SigningConfig,
+  params: CreateWalletParams,
+): Promise<string> {
   const query = buildUnsignedPayloadQuery(signing, params);
   const stamped = await stamp(
     { publicKey: signing.publicKey, privateKey: signing.privateKey },
     buildCanonicalUnsignedPayloadMessage(query),
   );
   const response = await sendUnsignedPayloadRequest(
-    api,
-    buildUnsignedPayloadUrl(api, query),
+    fetchImplementation,
+    buildUnsignedPayloadUrl(baseUrl, query),
     stamped,
   );
   const body = parseUnsignedPayloadBody(response);
@@ -141,7 +201,7 @@ function buildCanonicalUnsignedPayloadMessage(query: UnsignedPayloadQuery): stri
   });
 }
 
-function buildUnsignedPayloadUrl(api: TesserApiConnection, query: UnsignedPayloadQuery): string {
+function buildUnsignedPayloadUrl(baseUrl: string, query: UnsignedPayloadQuery): string {
   const queryEntries: [string, string][] = [
     ['organizationId', query.organizationId],
     ['name', query.name],
@@ -151,15 +211,14 @@ function buildUnsignedPayloadUrl(api: TesserApiConnection, query: UnsignedPayloa
   const queryString = queryEntries
     .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
     .join('&');
-  return `${api.baseUrl}${UNSIGNED_PAYLOAD_PATH}?${queryString}`;
+  return `${baseUrl}${UNSIGNED_PAYLOAD_PATH}?${queryString}`;
 }
 
 async function sendUnsignedPayloadRequest(
-  api: TesserApiConnection,
+  fetchImplementation: typeof fetch,
   url: string,
   stamped: StampResult,
 ): Promise<UnsignedPayloadResponse> {
-  const fetchImplementation = api.fetch;
   try {
     const response = await fetchImplementation(url, {
       method: 'GET',

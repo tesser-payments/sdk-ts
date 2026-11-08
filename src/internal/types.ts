@@ -64,10 +64,12 @@ export interface SignedStepResult {
 export interface LocalSignerOptions {
   signing: SigningConfig;
   /**
-   * Tesser API base URL: `https://api.tesser.xyz` in production,
-   * `https://api-sandbox.tesser.xyz` in sandbox. A trailing `/` or `/v1` is removed.
+   * Optional Tesser API base URL. Leave it unset and the signer finds the environment
+   * your signing key belongs to, production or sandbox. When set, only this URL is used:
+   * `https://api.tesser.xyz` in production, `https://api-sandbox.tesser.xyz` in sandbox.
+   * A trailing `/` or `/v1` is removed.
    */
-  apiBaseUrl: string;
+  apiBaseUrl?: string | undefined;
   /**
    * `fetch` implementation used for requests to Tesser. Inject one to configure a
    * proxy. Defaults to the global `fetch`.
