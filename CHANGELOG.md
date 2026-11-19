@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-11-19
+
 ### Deprecated
 
 - `TesserErrorDetail.uiMessage`. `ui_message` is meant for Tesser's dashboard, and the Tesser API will stop returning it to API-key requests on a date to be announced. The field stays optional and is still parsed when present; after that date it will be `undefined`. Use `errorMessage` instead, and `errorCode` for logic.
