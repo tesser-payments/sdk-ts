@@ -31,6 +31,12 @@ export class TesserConfigError extends TesserError {
 export interface TesserErrorDetail {
   errorCode: string;
   errorMessage: string;
+  /**
+   * @deprecated `ui_message` is meant for Tesser's dashboard. The API will stop
+   * returning it to API-key requests on a date to be announced, and this field
+   * will then be `undefined`. Use `errorMessage` instead, and `errorCode` for
+   * logic.
+   */
   uiMessage?: string;
 }
 
